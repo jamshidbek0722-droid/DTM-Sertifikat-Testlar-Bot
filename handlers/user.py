@@ -12,7 +12,7 @@ from database.repositories.submission_repo import SubmissionRepo
 from database.models import UserModel, SubmissionModel, TestStatus, TestModel
 from services.parser import parse_answer_string
 from services.grader import grade_submission
-from keyboards.user_kb import get_join_test_kb
+from keyboards.user_kb import get_join_test_kb, get_main_menu_kb
 from utils.formatters import fmt
 
 user_router = Router()
@@ -26,11 +26,62 @@ async def cmd_start(message: Message):
     )
     await UserRepo.create_user(user)
         
-    await message.answer(fmt.WELCOME.format(name=message.from_user.full_name))
+    await message.answer(
+        fmt.WELCOME.format(name=message.from_user.full_name),
+        reply_markup=get_main_menu_kb()
+    )
+
+@user_router.message(F.text == "📝 Test ishlash")
+async def process_test_ishlash(message: Message):
+    # Fetch active tests that the user hasn't submitted yet
+    active_tests = await db_conn.db.tests.find({"status": TestStatus.active.value}).to_list(length=10)
+    available_tests = []
+    
+    for doc in active_tests:
+        t = TestModel(**doc)
+        sub = await SubmissionRepo.get_submission(t.test_id, message.from_user.id)
+        if not sub:
+            available_tests.append(t)
+            
+    if not available_tests:
+        await message.answer("Siz ishtirok etishingiz mumkin bo'lgan faol testlar hozircha yo'q.")
+        return
+        
+    for t in available_tests:
+        caption = f"📚 Test: {t.title}\n📖 Fan: {t.subject}\n⏱ Davomiyligi: {t.duration} daqiqa"
+        await message.answer(caption, reply_markup=get_join_test_kb(t.test_id))
+
+@user_router.message(F.text == "📊 Mening natijalarim")
+async def process_mening_natijalarim(message: Message):
+    # Get user stats from user collection
+    user_doc = await db_conn.db.users.find_one({"user_id": message.from_user.id})
+    if not user_doc:
+        await message.answer("Sizning ma'lumotlaringiz topilmadi.")
+        return
+        
+    total_score = user_doc.get("total_score", 0)
+    tests_taken = user_doc.get("tests_taken", 0)
+    
+    text = f"📊 Sizning umumiy natijalaringiz:\n\n"
+    text += f"Jami qatnashgan testlar: {tests_taken} ta\n"
+    text += f"To'plagan umumiy ball: {total_score}\n"
+    
+    await message.answer(text)
+
+@user_router.message(F.text == "ℹ️ Qoidalar")
+async def process_qoidalar(message: Message):
+    rules_text = (
+        "ℹ️ Qoidalar:\n\n"
+        "1. Test boshlanganda sizga PDF fayl yuboriladi.\n"
+        "2. Javoblarni yuborish uchun botga ketma-ket harflarni yozing (masalan: 1a2b3c... yoki 1-a 2-b).\n"
+        "3. Test uchun belgilangan vaqt tugagach yuborilgan javoblar hisobga olinmaydi.\n"
+        "4. Bitta test uchun faqat bir marta javob yuborishingiz mumkin."
+    )
+    await message.answer(rules_text)
 
 @user_router.message(Command("test"))
 async def cmd_test(message: Message):
-    await message.answer("Testlar ro'yxati kanal orqali yuboriladi. Kanalga kiring va 'Ishtirok etish' tugmasini bosing.")
+    await process_test_ishlash(message)
 
 @user_router.callback_query(F.data.startswith("join_test_"))
 async def join_test(call: CallbackQuery):
@@ -55,10 +106,12 @@ async def join_test(call: CallbackQuery):
 
 @user_router.message(F.text)
 async def process_submission(message: Message):
+    # Process text answers
     active_tests = await db_conn.db.tests.find({"status": TestStatus.active.value}).to_list(length=10)
     active_test_models = [TestModel(**doc) for doc in active_tests]
     
     if not active_test_models:
+        # Ignore normal chat if there are no active tests
         return 
         
     target_test = None

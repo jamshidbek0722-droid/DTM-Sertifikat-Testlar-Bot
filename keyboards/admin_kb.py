@@ -3,10 +3,10 @@ from database.models import ChannelModel
 
 def get_admin_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📥 Test yuklash", callback_data="admin_upload_test")],
-        [InlineKeyboardButton(text="📋 Mening testlarim", callback_data="admin_my_tests")],
-        [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="📢 Kanallarni boshqarish", callback_data="admin_manage_channels")]
+        [InlineKeyboardButton(text="✉️ Xabar yuborish", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="📈 Statistika", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="➕ Test qo'shish", callback_data="admin_upload_test")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin_users")]
     ])
 
 def get_cancel_kb() -> InlineKeyboardMarkup:

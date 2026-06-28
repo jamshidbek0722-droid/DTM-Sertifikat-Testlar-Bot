@@ -1,5 +1,6 @@
 import uuid
 import re
+import asyncio
 from datetime import datetime
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -11,6 +12,7 @@ from middlewares.auth import AdminMiddleware
 from keyboards.admin_kb import get_admin_main_kb, get_cancel_kb, get_confirm_kb, get_skip_kb, get_channels_kb
 from database.repositories.test_repo import TestRepo
 from database.repositories.channel_repo import ChannelRepo
+from database.connection import db_conn
 from database.models import TestModel, TestStatus
 from services.parser import parse_answer_string
 from config import config
@@ -30,6 +32,9 @@ class TestUploadStates(StatesGroup):
     waiting_for_duration = State()
     confirm_upload = State()
 
+class BroadcastStates(StatesGroup):
+    waiting_for_message = State()
+
 @admin_router.message(Command("admin"))
 async def cmd_admin(message: Message):
     await message.answer(fmt.ADMIN_PANEL, reply_markup=get_admin_main_kb())
@@ -41,14 +46,57 @@ async def cancel_action(call: CallbackQuery, state: FSMContext):
     await call.message.answer(fmt.ADMIN_PANEL, reply_markup=get_admin_main_kb())
     await call.answer()
 
+# --- BROADCASTING FSM ---
+@admin_router.callback_query(F.data == "admin_broadcast")
+async def start_broadcast(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("Barcha foydalanuvchilarga yubormoqchi bo'lgan xabarni yuboring (Rasm, video yoki matn):", reply_markup=get_cancel_kb())
+    await state.set_state(BroadcastStates.waiting_for_message)
+    await call.answer()
+
+@admin_router.message(BroadcastStates.waiting_for_message)
+async def process_broadcast_message(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Xabar yuborilmoqda... Iltimos kuting.")
+    
+    # Get all users from DB
+    users_cursor = db_conn.db.users.find({}, {"user_id": 1})
+    users = await users_cursor.to_list(length=None)
+    
+    success_count = 0
+    fail_count = 0
+    
+    async def send_msg(user_id):
+        nonlocal success_count, fail_count
+        try:
+            await message.copy_to(chat_id=user_id)
+            success_count += 1
+        except Exception:
+            fail_count += 1
+            
+    # Send concurrently safely
+    tasks = [send_msg(user['user_id']) for user in users]
+    await asyncio.gather(*tasks, return_exceptions=True)
+    
+    await message.answer(f"✅ Xabar yuborish yakunlandi.\n\nYetib bordi: {success_count}\nYuborilmadi (bloklagan): {fail_count}", reply_markup=get_admin_main_kb())
+
+# --- DUMMY HANDLERS FOR OTHER ADMIN BUTTONS ---
+@admin_router.callback_query(F.data == "admin_stats")
+async def admin_stats(call: CallbackQuery):
+    await call.answer("Tez orada qo'shiladi!", show_alert=True)
+
+@admin_router.callback_query(F.data == "admin_users")
+async def admin_users(call: CallbackQuery):
+    await call.answer("Tez orada qo'shiladi!", show_alert=True)
+
+# --- TEST UPLOAD FSM ---
 @admin_router.callback_query(F.data == "admin_upload_test")
 async def start_upload(call: CallbackQuery, state: FSMContext):
     channels = await ChannelRepo.get_channels_by_admin(call.from_user.id)
     if not channels and call.from_user.id != config.owner_id:
         await call.message.edit_text("Sizga biriktirilgan kanallar yo'q.", reply_markup=get_cancel_kb())
+        await call.answer()
         return
         
-    # For testing, if super admin has no channels registered yet, let them use 0 or dummy
     if not channels and call.from_user.id == config.owner_id:
         channels = [type('obj', (object,), {'channel_id': 0, 'channel_username': 'Global'})()]
         
@@ -148,7 +196,6 @@ async def process_duration(message: Message, state: FSMContext):
 async def confirm_upload(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     
-    # Forward to DB channel to get persistent file_id
     try:
         msg = await call.message.bot.send_document(
             chat_id=config.database_channel_id,
@@ -167,6 +214,7 @@ async def confirm_upload(call: CallbackQuery, state: FSMContext):
             final_sol_id = sol_msg.document.file_id
     except Exception as e:
         await call.message.answer(f"Faylni bazaga yuklashda xatolik: {e}")
+        await call.answer()
         return
         
     new_test = TestModel(
