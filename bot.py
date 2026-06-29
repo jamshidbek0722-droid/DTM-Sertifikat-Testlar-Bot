@@ -69,9 +69,7 @@ async def main():
             return web.Response(text="Bot is running", status=200)
             
         app.router.add_get('/', ping_handler)
-        app.router.add_head('/', ping_handler)
         app.router.add_get(WEBHOOK_PATH, ping_handler)
-        app.router.add_head(WEBHOOK_PATH, ping_handler)
         
         webhook_requests_handler = SimpleRequestHandler(
             dispatcher=dp,
