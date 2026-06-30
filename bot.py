@@ -12,6 +12,7 @@ from typing import Callable, Dict, Any, Awaitable
 
 from config import config
 from database.connection import db_conn
+from utils.mongo_storage import MongoStorage
 from handlers import router
 from middlewares.throttle import ThrottleMiddleware
 from services.scheduler import start_scheduler
@@ -69,7 +70,7 @@ async def main():
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
-    dp = Dispatcher()
+    dp = Dispatcher(storage=MongoStorage(db_conn))
 
     dp.update.outer_middleware(UpdateLoggerMiddleware())
     dp.message.middleware(ThrottleMiddleware())
