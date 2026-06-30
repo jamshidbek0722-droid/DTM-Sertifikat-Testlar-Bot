@@ -12,7 +12,7 @@ from typing import Callable, Dict, Any, Awaitable
 
 from config import config
 from database.connection import db_conn
-from utils.mongo_storage import MongoStorage
+from aiogram.fsm.storage.memory import MemoryStorage
 from handlers import router
 from middlewares.throttle import ThrottleMiddleware
 from services.scheduler import start_scheduler
@@ -48,7 +48,7 @@ async def on_startup(bot: Bot):
     await db_conn.connect()
     start_scheduler()
     if not config.debug:
-        await bot.set_webhook(WEBHOOK_URL)
+        await bot.set_webhook(WEBHOOK_URL, allowed_updates=["message", "callback_query"])
 
 async def on_shutdown(bot: Bot):
     if not config.debug:
@@ -70,7 +70,7 @@ async def main():
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
-    dp = Dispatcher(storage=MongoStorage(db_conn))
+    dp = Dispatcher(storage=MemoryStorage())
 
     dp.update.outer_middleware(UpdateLoggerMiddleware())
     dp.message.middleware(ThrottleMiddleware())
