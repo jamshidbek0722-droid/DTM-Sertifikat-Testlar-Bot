@@ -7,6 +7,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
+from aiogram import BaseMiddleware
+from typing import Callable, Dict, Any, Awaitable
 
 from config import config
 from database.connection import db_conn
@@ -16,6 +18,30 @@ from services.scheduler import start_scheduler
 
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"https://dtm-sertifikat-bot.onrender.com{WEBHOOK_PATH}"
+
+logger = logging.getLogger(__name__)
+
+class UpdateLoggerMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Any, Dict[str, Any]], Awaitable[Any]],
+        event: Any,
+        data: Dict[str, Any]
+    ) -> Any:
+        try:
+            update_id = getattr(event, "update_id", "Unknown")
+            user_id = "Unknown"
+            
+            if hasattr(event, "message") and event.message and event.message.from_user:
+                user_id = event.message.from_user.id
+            elif hasattr(event, "callback_query") and event.callback_query and event.callback_query.from_user:
+                user_id = event.callback_query.from_user.id
+                
+            logger.info(f"Received update: {update_id} from user {user_id}")
+        except Exception as e:
+            logger.error(f"Error in UpdateLoggerMiddleware: {e}")
+            
+        return await handler(event, data)
 
 async def on_startup(bot: Bot):
     await db_conn.connect()
@@ -45,6 +71,7 @@ async def main():
     )
     dp = Dispatcher()
 
+    dp.update.outer_middleware(UpdateLoggerMiddleware())
     dp.message.middleware(ThrottleMiddleware())
     dp.include_router(router)
 
