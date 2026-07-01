@@ -6,8 +6,15 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+
+# Robust parser for DB_CHANNEL_ID to handle potential brackets or spacing
+db_channel_str = os.getenv("DB_CHANNEL_ID", "0").strip("[] ")
+try:
+    DB_CHANNEL_ID = int(db_channel_str)
+except ValueError:
+    DB_CHANNEL_ID = 0
+
 MONGO_URI = os.getenv("MONGO_URI") or os.getenv("MONGODB_URI")
-DB_CHANNEL_ID = int(os.getenv("DB_CHANNEL_ID", "0"))
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 PORT = int(os.getenv("PORT", "8080"))
 WEBHOOK_PATH = os.getenv("WEBHOOK_PATH", "/webhook")

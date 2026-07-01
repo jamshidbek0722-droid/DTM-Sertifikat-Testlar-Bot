@@ -49,13 +49,13 @@ def get_admin_test_management_keyboard() -> InlineKeyboardMarkup:
 
 def get_region_keyboard() -> InlineKeyboardMarkup:
     regions = [
-        "Toshkent sh.", "Toshkent vil.",
-        "Samarqand", "Buxoro",
-        "Andijon", "Farg'ona",
-        "Namangan", "Qashqadaryo",
-        "Surxondaryo", "Xorazm",
-        "Navoiy", "Jizzax",
-        "Sirdaryo", "Qoraqalpog'iston"
+        "Toshkent shahri", "Toshkent viloyati",
+        "Samarqand viloyati", "Buxoro viloyati",
+        "Andijon viloyati", "Farg'ona viloyati",
+        "Namangan viloyati", "Qashqadaryo viloyati",
+        "Surxondaryo viloyati", "Xorazm viloyati",
+        "Navoiy viloyati", "Jizzax viloyati",
+        "Sirdaryo viloyati", "Qoraqalpog'iston Res."
     ]
     buttons = []
     for i in range(0, len(regions), 2):
@@ -73,7 +73,7 @@ def get_subjects_keyboard(selected_subjects: list) -> InlineKeyboardMarkup:
     subjects = [
         "Matematika", "Fizika", "Kimyo", "Biologiya",
         "Ingliz tili", "Informatika", "Ona tili va adabiyot",
-        "Tarix", "Geografiya", "Rus tili"
+        "Tarix", "Geografiya"
     ]
     buttons = []
     for i in range(0, len(subjects), 2):
@@ -89,5 +89,5 @@ def get_subjects_keyboard(selected_subjects: list) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(text=t2, callback_data=f"sub_toggle:{s2}")
             )
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="💾 Saqlash", callback_data="save_subjects")])
+    buttons.append([InlineKeyboardButton(text="📥 Saqlash", callback_data="save_subjects")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

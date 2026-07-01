@@ -67,7 +67,7 @@ async def start_create_test(call: CallbackQuery, state: FSMContext):
     )
 
 @router.message(TestCreationStates.waiting_for_file)
-async def process_test_file(message: Message, state: FSMContext, bot: Bot):
+async def process_test_file(message: Message, state: FSMContext):
     # Determine type of file
     file_id = None
     file_type = None
@@ -85,25 +85,6 @@ async def process_test_file(message: Message, state: FSMContext, bot: Bot):
         await message.answer("⚠️ Iltimos, faqat PDF fayl, Hujjat yoki Rasm yuboring:")
         return
 
-    # Try copying the message to the DB_CHANNEL_ID
-    try:
-        copied_msg = await bot.copy_message(
-            chat_id=DB_CHANNEL_ID,
-            from_chat_id=message.chat.id,
-            message_id=message.message_id
-        )
-        if copied_msg.document:
-            file_id = copied_msg.document.file_id
-            file_type = "document"
-        elif copied_msg.photo:
-            file_id = copied_msg.photo[-1].file_id
-            file_type = "photo"
-        elif copied_msg.video:
-            file_id = copied_msg.video.file_id
-            file_type = "video"
-    except Exception as e:
-        logger.warning(f"Could not forward file to database channel (falling back to direct file_id): {e}")
-
     # Retrieve current files list from state and append
     data = await state.get_data()
     files = data.get("files", [])
@@ -112,24 +93,56 @@ async def process_test_file(message: Message, state: FSMContext, bot: Bot):
     
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="💾 Saqlash va davom etish", callback_data="admin_save_files")]
+            [InlineKeyboardButton(text="📥 Rasmlarni saqlash va davom etish", callback_data="admin_save_files")]
         ]
     )
     await message.answer(
         f"📎 Fayl muvaffaqiyatli qabul qilindi. (Jami: {len(files)} ta fayl)\n\n"
         f"Yana rasm yoki hujjat yuborishingiz mumkin. Barcha fayllarni yuborib bo'lgach, "
-        f"quyidagi '💾 Saqlash va davom etish' tugmasini bosing:",
+        f"quyidagi '📥 Rasmlarni saqlash va davom etish' tugmasini bosing:",
         reply_markup=kb
     )
 
 @router.callback_query(TestCreationStates.waiting_for_file, F.data == "admin_save_files")
-async def save_uploaded_files(call: CallbackQuery, state: FSMContext):
+async def save_uploaded_files(call: CallbackQuery, state: FSMContext, bot: Bot):
     await call.answer()
     data = await state.get_data()
     files = data.get("files", [])
     if not files:
         await call.message.answer("⚠️ Iltimos, avval test savollari rasm yoki hujjat faylini yuboring!")
         return
+        
+    status_msg = await call.message.answer("🔄 Fayllar log kanaliga yuklanmoqda, iltimos kuting...")
+    
+    forwarded_files = []
+    # Send files to DB_CHANNEL_ID safely and get the new file IDs
+    for item in files:
+        f_id = item["file_id"]
+        f_type = item["file_type"]
+        try:
+            if f_type == "photo":
+                sent_msg = await bot.send_photo(chat_id=DB_CHANNEL_ID, photo=f_id)
+                new_id = sent_msg.photo[-1].file_id
+                forwarded_files.append({"file_id": new_id, "file_type": "photo"})
+            elif f_type == "video":
+                sent_msg = await bot.send_video(chat_id=DB_CHANNEL_ID, video=f_id)
+                new_id = sent_msg.video.file_id
+                forwarded_files.append({"file_id": new_id, "file_type": "video"})
+            else:
+                sent_msg = await bot.send_document(chat_id=DB_CHANNEL_ID, document=f_id)
+                new_id = sent_msg.document.file_id
+                forwarded_files.append({"file_id": new_id, "file_type": "document"})
+        except Exception as e:
+            logger.exception("Faylni log kanaliga yuborishda xatolik yuz berdi:")
+            # Fallback to direct file_id if channel copy fails
+            forwarded_files.append({"file_id": f_id, "file_type": f_type})
+            
+    await state.update_data(files=forwarded_files)
+    
+    try:
+        await status_msg.delete()
+    except Exception:
+        pass
         
     await state.set_state(TestCreationStates.waiting_for_keys)
     await call.message.answer("Javoblar kalitini yuboring (masalan, `abcdabcd...` yoki `1a2b3c...`):")
