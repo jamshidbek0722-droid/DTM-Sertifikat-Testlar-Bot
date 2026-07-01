@@ -88,8 +88,6 @@ async def process_cancel(message: Message, state: FSMContext):
 
 # --- Profile Completion FSM ---
 
-# --- Profile Completion FSM ---
-
 @router.callback_query(F.data == "complete_profile")
 async def start_profile_completion(call: CallbackQuery, state: FSMContext):
     await call.answer()
