@@ -7,7 +7,10 @@ from database.db import (
 )
 from states.states import ProfileStates
 from keyboards.reply import get_main_keyboard, get_cancel_keyboard
-from keyboards.inline import get_complete_profile_keyboard, get_gender_keyboard, get_subscription_keyboard
+from keyboards.inline import (
+    get_complete_profile_keyboard, get_gender_keyboard, get_subscription_keyboard,
+    get_region_keyboard, get_subjects_keyboard
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -85,6 +88,8 @@ async def process_cancel(message: Message, state: FSMContext):
 
 # --- Profile Completion FSM ---
 
+# --- Profile Completion FSM ---
+
 @router.callback_query(F.data == "complete_profile")
 async def start_profile_completion(call: CallbackQuery, state: FSMContext):
     await call.answer()
@@ -94,15 +99,37 @@ async def start_profile_completion(call: CallbackQuery, state: FSMContext):
     # Clear reply keyboard
     cancel_kb = get_cancel_keyboard()
     await call.message.answer(
-        "Iltimos, yashash hududingizni (viloyat/shahar) kiriting:",
+        "Ro'yxatdan o'tish boshlandi. Hududni tanlang:",
         reply_markup=cancel_kb
     )
+    
+    region_kb = get_region_keyboard()
+    await call.message.answer(
+        "Iltimos, yashash hududingizni (viloyat/shahar) tanlang:",
+        reply_markup=region_kb
+    )
+
+@router.callback_query(ProfileStates.waiting_for_region, F.data.startswith("region:"))
+async def process_region_callback(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    region = call.data.split(":")[1]
+    
+    await state.update_data(region=region)
+    await state.set_state(ProfileStates.waiting_for_gender)
+    
+    kb = get_gender_keyboard()
+    await call.message.answer(
+        f"Tanlangan hudud: **{region}**\n\nJinsingizni tanlang:",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+    await call.message.delete()
 
 @router.message(ProfileStates.waiting_for_region)
 async def process_region(message: Message, state: FSMContext):
     region = message.text.strip()
     if not region or len(region) < 3:
-        await message.answer("Iltimos, haqiqiy hudud nomini kiriting:")
+        await message.answer("Iltimos, hududingizni quyidagi tugmalar orqali tanlang:")
         return
         
     await state.update_data(region=region)
@@ -139,19 +166,46 @@ async def process_age(message: Message, state: FSMContext):
     await state.update_data(age=age)
     await state.set_state(ProfileStates.waiting_for_subject)
     
+    # Initialize empty selected subjects
+    await state.update_data(selected_subjects=[])
+    kb = get_subjects_keyboard([])
     await message.answer(
-        "Qiziqadigan faningizni kiriting (masalan, Matematika, Ingliz tili):"
+        "Quyidagi ro'yxatdan qiziqadigan fanlaringizni tanlang (bir nechtasini tanlashingiz mumkin) "
+        "va '💾 Saqlash' tugmasini bosing:",
+        reply_markup=kb
     )
 
-@router.message(ProfileStates.waiting_for_subject)
-async def process_subject(message: Message, state: FSMContext):
-    subject = message.text.strip()
-    if not subject or len(subject) < 2:
-        await message.answer("Iltimos, fan nomini to'g'ri kiriting:")
+@router.callback_query(ProfileStates.waiting_for_subject, F.data.startswith("sub_toggle:"))
+async def toggle_subject_callback(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    subject = call.data.split(":")[1]
+    
+    data = await state.get_data()
+    selected_subjects = data.get("selected_subjects", [])
+    
+    if subject in selected_subjects:
+        selected_subjects.remove(subject)
+    else:
+        selected_subjects.append(subject)
+        
+    await state.update_data(selected_subjects=selected_subjects)
+    
+    kb = get_subjects_keyboard(selected_subjects)
+    await call.message.edit_reply_markup(reply_markup=kb)
+
+@router.callback_query(ProfileStates.waiting_for_subject, F.data == "save_subjects")
+async def save_subjects_callback(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    selected_subjects = data.get("selected_subjects", [])
+    
+    if not selected_subjects:
+        await call.answer("⚠️ Iltimos, kamida bitta fanni tanlang!", show_alert=True)
         return
         
-    data = await state.get_data()
-    tg_id = message.from_user.id
+    await call.answer()
+    
+    subject_str = ", ".join(selected_subjects)
+    tg_id = call.from_user.id
     
     # Save user details
     await register_user(
@@ -159,14 +213,17 @@ async def process_subject(message: Message, state: FSMContext):
         region=data['region'],
         gender=data['gender'],
         age=data['age'],
-        subject=subject
+        subject=subject_str
     )
     
     await state.clear()
     kb = await get_main_keyboard(tg_id)
-    await message.answer(
-        "🎉 Profilingiz muvaffaqiyatli yakunlandi! Rahmat.",
-        reply_markup=kb
+    await call.message.delete()
+    await call.message.answer(
+        f"🎉 Profilingiz muvaffaqiyatli yakunlandi! Rahmat.\n\n"
+        f"📚 Tanlangan fanlar: **{subject_str}**",
+        reply_markup=kb,
+        parse_mode="Markdown"
     )
 
 # --- Main Menu Button Handlers ---

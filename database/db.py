@@ -171,14 +171,14 @@ async def set_global_footer(text: str):
     )
 
 # --- Test Helpers ---
-async def create_test(test_id: str, creator_id: int, file_id: str, answer_key: str, 
+async def create_test(test_id: str, creator_id: int, file_ids: list, answer_key: str, 
                       solutions_text: str, channel_id: int, start_time: datetime.datetime, 
                       duration_minutes: int) -> bool:
     try:
         await tests_col.insert_one({
             "test_id": test_id,
             "creator_id": creator_id,
-            "file_id": file_id,
+            "file_ids": file_ids,
             "answer_key": answer_key.lower(),
             "solutions_text": solutions_text,
             "channel_id": channel_id,

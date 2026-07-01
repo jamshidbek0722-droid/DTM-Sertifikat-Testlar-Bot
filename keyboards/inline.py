@@ -46,3 +46,48 @@ def get_admin_test_management_keyboard() -> InlineKeyboardMarkup:
             ]
         ]
     )
+
+def get_region_keyboard() -> InlineKeyboardMarkup:
+    regions = [
+        "Toshkent sh.", "Toshkent vil.",
+        "Samarqand", "Buxoro",
+        "Andijon", "Farg'ona",
+        "Namangan", "Qashqadaryo",
+        "Surxondaryo", "Xorazm",
+        "Navoiy", "Jizzax",
+        "Sirdaryo", "Qoraqalpog'iston"
+    ]
+    buttons = []
+    for i in range(0, len(regions), 2):
+        row = [
+            InlineKeyboardButton(text=regions[i], callback_data=f"region:{regions[i]}")
+        ]
+        if i + 1 < len(regions):
+            row.append(
+                InlineKeyboardButton(text=regions[i+1], callback_data=f"region:{regions[i+1]}")
+            )
+        buttons.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_subjects_keyboard(selected_subjects: list) -> InlineKeyboardMarkup:
+    subjects = [
+        "Matematika", "Fizika", "Kimyo", "Biologiya",
+        "Ingliz tili", "Informatika", "Ona tili va adabiyot",
+        "Tarix", "Geografiya", "Rus tili"
+    ]
+    buttons = []
+    for i in range(0, len(subjects), 2):
+        s1 = subjects[i]
+        t1 = f"✅ {s1}" if s1 in selected_subjects else s1
+        row = [
+            InlineKeyboardButton(text=t1, callback_data=f"sub_toggle:{s1}")
+        ]
+        if i + 1 < len(subjects):
+            s2 = subjects[i+1]
+            t2 = f"✅ {s2}" if s2 in selected_subjects else s2
+            row.append(
+                InlineKeyboardButton(text=t2, callback_data=f"sub_toggle:{s2}")
+            )
+        buttons.append(row)
+    buttons.append([InlineKeyboardButton(text="💾 Saqlash", callback_data="save_subjects")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -52,32 +52,60 @@ async def start_test_job(bot: Bot, test_id: str):
         ]
     )
     
-    file_id = test.get("file_id")
-    file_type = test.get("file_type", "document")
+    file_ids = test.get("file_ids", [])
+    if not file_ids and test.get("file_id"):
+        file_ids = [{"file_id": test.get("file_id"), "file_type": test.get("file_type", "document")}]
+        
     channel_id = test["channel_id"]
-    
     sent_msg = None
+    
     try:
-        if file_type == "photo":
-            sent_msg = await bot.send_photo(
-                chat_id=channel_id,
-                photo=file_id,
-                caption=caption,
-                reply_markup=kb,
-                parse_mode="Markdown"
-            )
-        else:
-            sent_msg = await bot.send_document(
-                chat_id=channel_id,
-                document=file_id,
-                caption=caption,
-                reply_markup=kb,
-                parse_mode="Markdown"
-            )
+        if file_ids:
+            # Post the first file with the main caption and deep link keyboard
+            first_file = file_ids[0]
+            f_id = first_file.get("file_id")
+            f_type = first_file.get("file_type", "document")
             
-        if sent_msg:
-            await update_test_post_msg_id(test_id, sent_msg.message_id)
-            logger.info(f"Test {test_id} successfully posted to channel {channel_id}.")
+            if f_type == "photo":
+                sent_msg = await bot.send_photo(
+                    chat_id=channel_id,
+                    photo=f_id,
+                    caption=caption,
+                    reply_markup=kb,
+                    parse_mode="Markdown"
+                )
+            else:
+                sent_msg = await bot.send_document(
+                    chat_id=channel_id,
+                    document=f_id,
+                    caption=caption,
+                    reply_markup=kb,
+                    parse_mode="Markdown"
+                )
+                
+            if sent_msg:
+                await update_test_post_msg_id(test_id, sent_msg.message_id)
+                logger.info(f"Test {test_id} successfully posted to channel {channel_id}.")
+                
+            # Post any additional files linked to this test
+            for idx, item in enumerate(file_ids[1:], start=2):
+                f_id = item.get("file_id")
+                f_type = item.get("file_type", "document")
+                try:
+                    if f_type == "photo":
+                        await bot.send_photo(
+                            chat_id=channel_id,
+                            photo=f_id,
+                            caption=f"📊 Test ID: `{test_id}` (davomi - {idx}-fayl)"
+                        )
+                    else:
+                        await bot.send_document(
+                            chat_id=channel_id,
+                            document=f_id,
+                            caption=f"📊 Test ID: `{test_id}` (davomi - {idx}-fayl)"
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to post additional file {f_id} to channel {channel_id}: {e}")
     except Exception as e:
         logger.error(f"Failed to post test {test_id} to channel {channel_id}: {e}")
 

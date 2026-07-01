@@ -51,18 +51,22 @@ async def start_test_taking(message: Message, user: User, test_id: str, state: F
         parse_mode="Markdown"
     )
     
-    # Send test file (forwarded file)
-    file_id = test.get("file_id")
-    file_type = test.get("file_type", "document")
-    
-    try:
-        if file_type == "photo":
-            await message.bot.send_photo(chat_id=user.id, photo=file_id, caption="📊 Test savollari")
-        else:
-            await message.bot.send_document(chat_id=user.id, document=file_id, caption="📊 Test savollari")
-    except Exception as e:
-        logger.error(f"Error sending test file to user {user.id}: {e}")
-        await message.answer("⚠️ Test savollari faylini yuborishda xatolik yuz berdi, lekin javoblaringizni yuborishingiz mumkin.")
+    # Send test files
+    file_ids = test.get("file_ids", [])
+    if not file_ids and test.get("file_id"):
+        file_ids = [{"file_id": test.get("file_id"), "file_type": test.get("file_type", "document")}]
+        
+    for item in file_ids:
+        f_id = item.get("file_id")
+        f_type = item.get("file_type", "document")
+        try:
+            if f_type == "photo":
+                await message.bot.send_photo(chat_id=user.id, photo=f_id, caption="📊 Test savollari")
+            else:
+                await message.bot.send_document(chat_id=user.id, document=f_id, caption="📊 Test savollari")
+        except Exception as e:
+            logger.error(f"Error sending test file {f_id} to user {user.id}: {e}")
+            await message.answer("⚠️ Test savollari faylini yuborishda xatolik yuz berdi, lekin javoblaringizni yuborishingiz mumkin.")
 
 def parse_answers(user_input: str, total_questions: int) -> str:
     """

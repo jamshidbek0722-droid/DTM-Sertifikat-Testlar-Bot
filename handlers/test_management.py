@@ -73,18 +73,30 @@ async def start_create_test(call: CallbackQuery, state: FSMContext):
 
 @router.message(TestCreationStates.waiting_for_file)
 async def process_test_file(message: Message, state: FSMContext, bot: Bot):
-    # Determine type of file and forward to DB Channel
+    # Determine type of file
     file_id = None
     file_type = None
     
-    # We copy message to the DB_CHANNEL_ID
+    if message.document:
+        file_id = message.document.file_id
+        file_type = "document"
+    elif message.photo:
+        file_id = message.photo[-1].file_id
+        file_type = "photo"
+    elif message.video:
+        file_id = message.video.file_id
+        file_type = "video"
+    else:
+        await message.answer("⚠️ Iltimos, faqat PDF fayl, Hujjat yoki Rasm yuboring:")
+        return
+
+    # Try copying the message to the DB_CHANNEL_ID
     try:
         copied_msg = await bot.copy_message(
             chat_id=DB_CHANNEL_ID,
             from_chat_id=message.chat.id,
             message_id=message.message_id
         )
-        # Extract file_id from copied message
         if copied_msg.document:
             file_id = copied_msg.document.file_id
             file_type = "document"
@@ -94,17 +106,38 @@ async def process_test_file(message: Message, state: FSMContext, bot: Bot):
         elif copied_msg.video:
             file_id = copied_msg.video.file_id
             file_type = "video"
-        else:
-            await message.answer("⚠️ Iltimos, faqat PDF fayl, Hujjat yoki Rasm yuboring:")
-            return
     except Exception as e:
-        logger.error(f"Error forwarding file to database channel: {e}")
-        await message.answer("⚠️ Faylni log kanaliga yuborishda xatolik yuz berdi. Bot administrator ekanligini va kanalingiz to'g'ri sozlanganligini tekshiring:")
+        logger.warning(f"Could not forward file to database channel (falling back to direct file_id): {e}")
+
+    # Retrieve current files list from state and append
+    data = await state.get_data()
+    files = data.get("files", [])
+    files.append({"file_id": file_id, "file_type": file_type})
+    await state.update_data(files=files)
+    
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="💾 Saqlash va davom etish", callback_data="admin_save_files")]
+        ]
+    )
+    await message.answer(
+        f"📎 Fayl muvaffaqiyatli qabul qilindi. (Jami: {len(files)} ta fayl)\n\n"
+        f"Yana rasm yoki hujjat yuborishingiz mumkin. Barcha fayllarni yuborib bo'lgach, "
+        f"quyidagi '💾 Saqlash va davom etish' tugmasini bosing:",
+        reply_markup=kb
+    )
+
+@router.callback_query(TestCreationStates.waiting_for_file, F.data == "admin_save_files")
+async def save_uploaded_files(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    data = await state.get_data()
+    files = data.get("files", [])
+    if not files:
+        await call.message.answer("⚠️ Iltimos, avval test savollari rasm yoki hujjat faylini yuboring!")
         return
         
-    await state.update_data(file_id=file_id, file_type=file_type)
     await state.set_state(TestCreationStates.waiting_for_keys)
-    await message.answer("Javoblar kalitini yuboring (masalan, `abcdabcd...` yoki `1a2b3c...`):")
+    await call.message.answer("Javoblar kalitini yuboring (masalan, `abcdabcd...` yoki `1a2b3c...`):")
 
 @router.message(TestCreationStates.waiting_for_keys)
 async def process_test_keys(message: Message, state: FSMContext):
@@ -234,8 +267,7 @@ async def process_test_duration(message: Message, state: FSMContext, bot: Bot):
     admin_id = message.from_user.id
     
     # Fetch details
-    file_id = data['file_id']
-    file_type = data['file_type']
+    file_ids = data.get('files', [])
     answer_key = data['answer_key']
     solutions_text = data['solutions_text']
     channel_id = data['channel_id']
@@ -245,16 +277,13 @@ async def process_test_duration(message: Message, state: FSMContext, bot: Bot):
     success = await create_test(
         test_id=test_id,
         creator_id=admin_id,
-        file_id=file_id,
+        file_ids=file_ids,
         answer_key=answer_key,
         solutions_text=solutions_text,
         channel_id=channel_id,
         start_time=start_time,
         duration_minutes=duration
     )
-    
-    # Save file_type manually
-    await tests_col.update_one({"test_id": test_id}, {"$set": {"file_type": file_type}})
     
     await state.clear()
     kb = await get_admin_keyboard(admin_id)
