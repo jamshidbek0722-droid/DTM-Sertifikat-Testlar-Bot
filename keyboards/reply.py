@@ -3,17 +3,17 @@ from database.db import is_admin, is_owner
 
 async def get_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
     buttons = [
-        [KeyboardButton(text="📝 Active Tests"), KeyboardButton(text="🗂 Past Tests")],
-        [KeyboardButton(text="👤 Profile")]
+        [KeyboardButton(text="📝 Faol testlar"), KeyboardButton(text="🗂 Yakunlangan testlar")],
+        [KeyboardButton(text="👤 Profil")]
     ]
     # Check if user is an admin or owner
     if await is_admin(user_id):
-        buttons.append([KeyboardButton(text="⚙️ Admin Panel")])
+        buttons.append([KeyboardButton(text="⚙️ Admin panel")])
         
     return ReplyKeyboardMarkup(
         keyboard=buttons,
         resize_keyboard=True,
-        placeholder="Select an option..."
+        placeholder="Bo'limni tanlang..."
     )
 
 async def get_admin_keyboard(user_id: int) -> ReplyKeyboardMarkup:
@@ -22,26 +22,26 @@ async def get_admin_keyboard(user_id: int) -> ReplyKeyboardMarkup:
     
     if is_super:
         buttons = [
-            [KeyboardButton(text="📊 Statistics"), KeyboardButton(text="📝 Test Management")],
-            [KeyboardButton(text="📢 Broadcast"), KeyboardButton(text="🔗 Mandatory Subs")],
-            [KeyboardButton(text="🏷 Footer Settings"), KeyboardButton(text="👮 Add/Remove Admins")],
-            [KeyboardButton(text="🔙 Main Menu")]
+            [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📝 Testlarni boshqarish")],
+            [KeyboardButton(text="📢 Xabar yuborish"), KeyboardButton(text="🔗 Majburiy obunalar")],
+            [KeyboardButton(text="🏷 Footer sozlamalari"), KeyboardButton(text="👮 Adminlarni boshqarish")],
+            [KeyboardButton(text="🔙 Asosiy menyu")]
         ]
     else:
         # Standard admins: only Stats, Test Management, and My Channels
         buttons = [
-            [KeyboardButton(text="📊 Statistics"), KeyboardButton(text="📝 Test Management")],
-            [KeyboardButton(text="🔗 My Channels"), KeyboardButton(text="🔙 Main Menu")]
+            [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📝 Testlarni boshqarish")],
+            [KeyboardButton(text="🔗 Mening kanallarim"), KeyboardButton(text="🔙 Asosiy menyu")]
         ]
         
     return ReplyKeyboardMarkup(
         keyboard=buttons,
         resize_keyboard=True,
-        placeholder="Admin options..."
+        placeholder="Admin sozlamalari..."
     )
 
 def get_cancel_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="❌ Cancel")]],
+        keyboard=[[KeyboardButton(text="❌ Bekor qilish")]],
         resize_keyboard=True
     )

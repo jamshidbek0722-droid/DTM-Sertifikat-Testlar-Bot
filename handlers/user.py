@@ -78,7 +78,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
             reply_markup=kb
         )
 
-@router.message(F.text == "❌ Cancel")
+@router.message(F.text == "❌ Bekor qilish")
 async def process_cancel(message: Message, state: FSMContext):
     current_state = await state.get_state()
     if current_state:
@@ -228,7 +228,7 @@ async def save_subjects_callback(call: CallbackQuery, state: FSMContext):
 
 # --- Main Menu Button Handlers ---
 
-@router.message(F.text == "👤 Profile")
+@router.message(F.text == "👤 Profil")
 async def show_profile(message: Message):
     tg_id = message.from_user.id
     user = await get_user(tg_id)
@@ -264,7 +264,7 @@ async def show_profile(message: Message):
         )
         await message.answer(text, parse_mode="Markdown")
 
-@router.message(F.text == "📝 Active Tests")
+@router.message(F.text == "📝 Faol testlar")
 async def show_active_tests(message: Message):
     tests = await get_active_tests()
     if not tests:
@@ -280,7 +280,7 @@ async def show_active_tests(message: Message):
         
     await message.answer(text, parse_mode="Markdown", disable_web_page_preview=True)
 
-@router.message(F.text == "🗂 Past Tests")
+@router.message(F.text == "🗂 Yakunlangan testlar")
 async def show_past_tests(message: Message):
     tests = await get_past_tests()
     if not tests:

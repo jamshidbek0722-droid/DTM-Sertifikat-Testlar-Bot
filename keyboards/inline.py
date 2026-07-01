@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 def get_complete_profile_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="⚙️ Complete Profile", callback_data="complete_profile")]
+            [InlineKeyboardButton(text="⚙️ Profilni to'ldirish", callback_data="complete_profile")]
         ]
     )
 
@@ -11,8 +11,8 @@ def get_gender_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🙋‍♂️ Male", callback_data="gender_Male"),
-                InlineKeyboardButton(text="🙋‍♀️ Female", callback_data="gender_Female")
+                InlineKeyboardButton(text="🙋‍♂️ Erkak", callback_data="gender_Male"),
+                InlineKeyboardButton(text="🙋‍♀️ Ayol", callback_data="gender_Female")
             ]
         ]
     )
@@ -22,18 +22,18 @@ def get_subscription_keyboard(channels: list, start_payload: str = "none") -> In
     # Add each channel link
     for index, channel in enumerate(channels, start=1):
         invite_link = channel.get("invite_link", "https://t.me")
-        title = channel.get("title", f"Channel {index}")
-        buttons.append([InlineKeyboardButton(text=f"📢 Subscribe: {title}", url=invite_link)])
+        title = channel.get("title", f"Kanal {index}")
+        buttons.append([InlineKeyboardButton(text=f"📢 A'zo bo'lish: {title}", url=invite_link)])
         
     # Check button contains start_payload so we don't lose FSM context
-    buttons.append([InlineKeyboardButton(text="✅ Check Subscription", callback_data=f"check_sub:{start_payload}")])
+    buttons.append([InlineKeyboardButton(text="✅ Obunani tekshirish", callback_data=f"check_sub:{start_payload}")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_test_deep_link_keyboard(bot_username: str, test_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Check Answers", url=f"https://t.me/{bot_username}?start=test_{test_id}")]
+            [InlineKeyboardButton(text="✍️ Javoblarni tekshirish", url=f"https://t.me/{bot_username}?start=test_{test_id}")]
         ]
     )
 
@@ -41,8 +41,8 @@ def get_admin_test_management_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="➕ Create Test", callback_data="admin_create_test"),
-                InlineKeyboardButton(text="🗑 Delete Test", callback_data="admin_delete_test")
+                InlineKeyboardButton(text="➕ Test yaratish", callback_data="admin_create_test"),
+                InlineKeyboardButton(text="🗑 Testni o'chirish", callback_data="admin_delete_test")
             ]
         ]
     )

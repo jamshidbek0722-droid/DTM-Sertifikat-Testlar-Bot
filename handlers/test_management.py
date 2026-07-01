@@ -20,9 +20,11 @@ def generate_test_id() -> str:
     # 6-digit unique test ID
     return "".join(random.choices(string.digits, k=6))
 
+from keyboards.inline import get_admin_test_management_keyboard
+
 # --- Test Management Menu ---
 
-@router.message(F.text == "📝 Test Management")
+@router.message(F.text == "📝 Testlarni boshqarish")
 async def show_test_management(message: Message):
     if not await is_admin(message.from_user.id):
         return
@@ -44,14 +46,7 @@ async def show_test_management(message: Message):
                 f"   📢 Kanal ID: `{t['channel_id']}`\n\n"
             )
             
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="➕ Yangi Test Yaratish", callback_data="admin_create_test"),
-                InlineKeyboardButton(text="🗑 Testni O'chirish", callback_data="admin_delete_test")
-            ]
-        ]
-    )
+    kb = get_admin_test_management_keyboard()
     await message.answer(text, reply_markup=kb, parse_mode="Markdown")
 
 # --- Create Test FSM ---

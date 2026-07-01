@@ -30,21 +30,21 @@ async def check_owner_auth(message: Message) -> bool:
 
 # --- Admin Menu Navigation ---
 
-@router.message(F.text == "⚙️ Admin Panel")
+@router.message(F.text == "⚙️ Admin panel")
 async def open_admin_panel(message: Message):
     if not await check_admin_auth(message):
         return
     kb = await get_admin_keyboard(message.from_user.id)
     await message.answer("⚙️ Admin panelga xush kelibsiz. Quyidagi menyulardan birini tanlang:", reply_markup=kb)
 
-@router.message(F.text == "🔙 Main Menu")
+@router.message(F.text == "🔙 Asosiy menyu")
 async def back_to_main(message: Message):
     kb = await get_main_keyboard(message.from_user.id)
     await message.answer("Asosiy menyuga qaytdingiz.", reply_markup=kb)
 
 # --- Statistics Handler ---
 
-@router.message(F.text == "📊 Statistics")
+@router.message(F.text == "📊 Statistika")
 async def show_statistics(message: Message):
     if not await check_admin_auth(message):
         return
@@ -99,7 +99,7 @@ async def show_statistics(message: Message):
 
 # --- Mandatory Subs / My Channels Manager ---
 
-@router.message(F.text.in_({"🔗 Mandatory Subs", "🔗 My Channels"}))
+@router.message(F.text.in_({"🔗 Majburiy obunalar", "🔗 Mening kanallarim"}))
 async def manage_channels(message: Message):
     if not await check_admin_auth(message):
         return
@@ -108,7 +108,7 @@ async def manage_channels(message: Message):
     is_super = await is_owner(user_id)
     
     # Restrict Mandatory Subs button to super-admin and My Channels to standard-admin (for clean UI, but either gets their respective channels)
-    if message.text == "🔗 Mandatory Subs" and not is_super:
+    if message.text == "🔗 Majburiy obunalar" and not is_super:
         await message.answer("⚠️ Sizda bu bo'limga ruxsat yo'q.")
         return
         
@@ -259,7 +259,7 @@ async def process_delete_channel(call: CallbackQuery):
 
 # --- Broadcast Handler (Super Admin Only) ---
 
-@router.message(F.text == "📢 Broadcast")
+@router.message(F.text == "📢 Xabar yuborish")
 async def start_broadcast(message: Message, state: FSMContext):
     if not await check_owner_auth(message):
         return
@@ -311,7 +311,7 @@ async def process_broadcast_message(message: Message, state: FSMContext, bot: Bo
 
 # --- Global Footer Settings (Super Admin Only) ---
 
-@router.message(F.text == "🏷 Footer Settings")
+@router.message(F.text == "🏷 Footer sozlamalari")
 async def view_footer_settings(message: Message, state: FSMContext):
     if not await check_owner_auth(message):
         return
@@ -345,7 +345,7 @@ async def process_footer_text(message: Message, state: FSMContext):
 
 # --- Add/Remove Admins (Super Admin Only) ---
 
-@router.message(F.text == "👮 Add/Remove Admins")
+@router.message(F.text == "👮 Adminlarni boshqarish")
 async def view_admins(message: Message):
     if not await check_owner_auth(message):
         return
