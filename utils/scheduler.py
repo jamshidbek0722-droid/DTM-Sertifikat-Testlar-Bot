@@ -27,8 +27,12 @@ async def start_test_job(bot: Bot, test_id: str):
         logger.error(f"Test {test_id} not found in database.")
         return
         
-    if test.get("status") != "scheduled":
-        logger.warning(f"Test {test_id} status is {test.get('status')}, expected 'scheduled'. Skipping start.")
+    if test.get("status") == "active" and test.get("test_post_msg_id") is not None:
+        logger.warning(f"Test {test_id} is already active and posted. Skipping start.")
+        return
+        
+    if test.get("status") not in ["scheduled", "active"]:
+        logger.warning(f"Test {test_id} status is {test.get('status')}. Skipping start.")
         return
         
     # Update status to active
@@ -69,9 +73,12 @@ async def start_test_job(bot: Bot, test_id: str):
     try:
         # Check if we have multiple photos to group as Album
         if len(file_ids) > 1 and all(f.get("file_type") == "photo" for f in file_ids):
-            media_group = MediaGroupBuilder(caption=caption, parse_mode="HTML")
-            for f in file_ids:
-                media_group.add_photo(media=f["file_id"])
+            media_group = MediaGroupBuilder()
+            for idx, f in enumerate(file_ids):
+                if idx == 0:
+                    media_group.add_photo(media=f["file_id"], caption=caption, parse_mode="HTML")
+                else:
+                    media_group.add_photo(media=f["file_id"])
             sent_msgs = await bot.send_media_group(chat_id=channel_id, media=media_group.build())
             if sent_msgs:
                 sent_msg = sent_msgs[0]
@@ -352,7 +359,13 @@ async def reschedule_active_and_scheduled_tests(bot: Bot):
                 
         elif status == "active":
             if now < end_time:
-                # Still running. Schedule only end job.
+                if t.get("test_post_msg_id") is None:
+                    logger.info(f"Recovery: Test {test_id} status is active but test_post_msg_id is None (post failed). Starting job again.")
+                    await start_test_job(bot, test_id)
+                else:
+                    logger.info(f"Recovery: Rescheduled end job for active test {test_id} at {end_time}")
+                
+                # Reschedule end job
                 scheduler.add_job(
                     end_test_job,
                     "date",
@@ -361,7 +374,6 @@ async def reschedule_active_and_scheduled_tests(bot: Bot):
                     id=f"end_{test_id}",
                     replace_existing=True
                 )
-                logger.info(f"Recovery: Rescheduled end job for active test {test_id} at {end_time}")
             else:
                 # Duration passed. Finish it immediately.
                 logger.info(f"Recovery: Ending active test {test_id} immediately.")
