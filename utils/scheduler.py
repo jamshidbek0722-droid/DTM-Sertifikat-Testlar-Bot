@@ -1,5 +1,6 @@
 import datetime
 import html
+from datetime import timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from aiogram import Bot
@@ -13,9 +14,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Initialize APScheduler with AsyncIOExecutor
+# Initialize APScheduler explicitly in UTC to ensure it works uniformly on any host
 scheduler = AsyncIOScheduler(
-    executors={'default': AsyncIOExecutor()}
+    executors={'default': AsyncIOExecutor()},
+    timezone=timezone.utc
 )
 
 async def start_test_job(bot: Bot, test_id: str):
@@ -276,7 +278,13 @@ async def end_test_job(bot: Bot, test_id: str):
 
 async def schedule_test_jobs(bot: Bot, test_id: str, start_time: datetime.datetime, duration_minutes: int):
     """Schedules start and end jobs for a test"""
+    # Ensure start_time is timezone-aware UTC
+    if start_time.tzinfo is None:
+        start_time = start_time.replace(tzinfo=timezone.utc)
+        
     end_time = start_time + datetime.timedelta(minutes=duration_minutes)
+    if end_time.tzinfo is None:
+        end_time = end_time.replace(tzinfo=timezone.utc)
     
     # Schedule Start Job
     scheduler.add_job(
@@ -301,7 +309,7 @@ async def schedule_test_jobs(bot: Bot, test_id: str, start_time: datetime.dateti
 
 async def reschedule_active_and_scheduled_tests(bot: Bot):
     """Recovers and reschedules all tests on bot startup"""
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(timezone.utc)
     
     # Find all scheduled or active tests
     cursor = tests_col.find({"status": {"$in": ["scheduled", "active"]}})
@@ -310,8 +318,14 @@ async def reschedule_active_and_scheduled_tests(bot: Bot):
     for t in tests:
         test_id = t["test_id"]
         start_time = t["start_time"]
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=timezone.utc)
+            
         duration = t["duration_minutes"]
         end_time = start_time + datetime.timedelta(minutes=duration)
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=timezone.utc)
+            
         status = t["status"]
         
         if status == "scheduled":
