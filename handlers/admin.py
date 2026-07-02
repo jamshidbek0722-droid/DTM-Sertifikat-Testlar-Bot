@@ -222,7 +222,7 @@ async def process_delete_mchan(call: CallbackQuery):
 
 # --- Mening kanallarim Panel (Test channels managed per admin) ---
 
-@router.message(F.text == "🔗 Mening kanallarim")
+@router.message(F.text == "📣 Test o'tkaziladigan kanallar")
 async def manage_my_test_channels(message: Message):
     if not await check_admin_auth(message):
         return
