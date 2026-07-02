@@ -1,11 +1,14 @@
 import datetime
 import random
 import string
+import asyncio
+import html
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from database.db import (
-    is_admin, is_owner, get_channels_by_admin, create_test, get_test, delete_test, get_tests_by_creator
+    is_admin, is_owner, get_channels_by_admin, create_test, get_test, delete_test, get_tests_by_creator,
+    get_all_genres, get_genre
 )
 from states.states import TestCreationStates
 from keyboards.reply import get_admin_keyboard, get_cancel_keyboard
@@ -32,22 +35,31 @@ async def show_test_management(message: Message):
     user_id = message.from_user.id
     tests = await get_tests_by_creator(user_id)
     
-    text = "📝 **Siz yaratgan testlar ro'yxati:**\n\n"
+    text = "📝 <b>Siz yaratgan testlar ro'yxati:</b>\n\n"
     if not tests:
         text += "Siz hali test yaratmagansiz."
     else:
         for idx, t in enumerate(tests, 1):
             status_emoji = "⏳" if t['status'] == "scheduled" else "🟢" if t['status'] == "active" else "🔴"
             start_local = t['start_time'] + datetime.timedelta(hours=5) # Show in UTC+5
+            
+            # Fetch genre name
+            genre_name = "Nomalum"
+            if t.get("genre_id"):
+                g = await get_genre(t["genre_id"])
+                if g:
+                    genre_name = g["name"]
+                    
             text += (
-                f"{idx}. Test ID: `{t['test_id']}` ({status_emoji} {t['status'].upper()})\n"
+                f"{idx}. <b>{html.escape(t.get('test_name', 'Nomsiz'))}</b> ({html.escape(genre_name)})\n"
+                f"   📋 Test ID: <code>{t['test_id']}</code> ({status_emoji} {t['status'].upper()})\n"
                 f"   📅 Boshlanishi: {start_local.strftime('%Y-%m-%d %H:%M')} (UZB time)\n"
                 f"   ⏱ Davomiyligi: {t['duration_minutes']} daqiqa\n"
-                f"   📢 Kanal ID: `{t['channel_id']}`\n\n"
+                f"   📢 Kanal ID: <code>{t['channel_id']}</code>\n\n"
             )
             
     kb = get_admin_test_management_keyboard()
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 # --- Create Test FSM ---
 
@@ -57,39 +69,108 @@ async def start_create_test(call: CallbackQuery, state: FSMContext):
     if not await is_admin(call.from_user.id):
         return
         
+    await state.set_state(TestCreationStates.waiting_for_test_name)
+    cancel_kb = get_cancel_keyboard()
+    await call.message.answer(
+        "📝 <b>Yangi test yaratish boshlandi.</b>\n\n"
+        "Iltimos, test nomini kiriting:",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+
+@router.message(TestCreationStates.waiting_for_test_name)
+async def process_test_name(message: Message, state: FSMContext):
+    test_name = message.text.strip()
+    if not test_name:
+        await message.answer("Test nomini kiriting:")
+        return
+    await state.update_data(test_name=test_name)
+    
+    # Check if there are genres in DB
+    genres = await get_all_genres()
+    if not genres:
+        await state.clear()
+        kb = await get_admin_keyboard(message.from_user.id)
+        await message.answer("⚠️ Hozirda hech qanday janr yaratilmagan. Avval '📚 Janrlarni boshqarish' bo'limida janr yarating.", reply_markup=kb)
+        return
+        
+    from keyboards.inline import get_genre_selection_keyboard
+    kb = get_genre_selection_keyboard(genres)
+    await state.set_state(TestCreationStates.waiting_for_genre)
+    await message.answer("📚 Test janrini tanlang:", reply_markup=kb)
+
+@router.callback_query(TestCreationStates.waiting_for_genre, F.data.startswith("create_test_genre:"))
+async def process_test_genre(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    genre_id = call.data.split(":")[1]
+    await state.update_data(genre_id=genre_id)
+    
     await state.set_state(TestCreationStates.waiting_for_file)
     cancel_kb = get_cancel_keyboard()
     await call.message.answer(
-        "📝 **Yangi test yaratish boshlandi.**\n\n"
+        "📝 <b>Test savollarini yuboring.</b>\n\n"
         "Iltimos, test savollari faylini yuboring (PDF, Rasm yoki istalgan hujjat):",
         reply_markup=cancel_kb,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
+
+# Media group cache barrier to handle multiple images
+media_group_cache = {}
 
 @router.message(TestCreationStates.waiting_for_file)
 async def process_test_file(message: Message, state: FSMContext):
-    # Determine type of file
-    file_id = None
-    file_type = None
-    
-    if message.document:
-        file_id = message.document.file_id
-        file_type = "document"
-    elif message.photo:
-        file_id = message.photo[-1].file_id
-        file_type = "photo"
-    elif message.video:
-        file_id = message.video.file_id
-        file_type = "video"
+    if message.media_group_id:
+        mg_id = message.media_group_id
+        if mg_id not in media_group_cache:
+            media_group_cache[mg_id] = []
+            is_first = True
+        else:
+            is_first = False
+            
+        if message.document:
+            media_group_cache[mg_id].append({"file_id": message.document.file_id, "file_type": "document"})
+        elif message.photo:
+            media_group_cache[mg_id].append({"file_id": message.photo[-1].file_id, "file_type": "photo"})
+        elif message.video:
+            media_group_cache[mg_id].append({"file_id": message.video.file_id, "file_type": "video"})
+            
+        if not is_first:
+            return
+            
+        await asyncio.sleep(0.5)
+        new_files = media_group_cache.pop(mg_id, [])
+        if not new_files:
+            return
+            
+        data = await state.get_data()
+        files = data.get("files", [])
+        files.extend(new_files)
+        await state.update_data(files=files)
     else:
-        await message.answer("⚠️ Iltimos, faqat PDF fayl, Hujjat yoki Rasm yuboring:")
-        return
-
-    # Retrieve current files list from state and append
+        # Single file
+        file_id = None
+        file_type = None
+        if message.document:
+            file_id = message.document.file_id
+            file_type = "document"
+        elif message.photo:
+            file_id = message.photo[-1].file_id
+            file_type = "photo"
+        elif message.video:
+            file_id = message.video.file_id
+            file_type = "video"
+        else:
+            await message.answer("⚠️ Iltimos, faqat PDF fayl, Hujjat yoki Rasm yuboring:")
+            return
+            
+        data = await state.get_data()
+        files = data.get("files", [])
+        files.append({"file_id": file_id, "file_type": file_type})
+        await state.update_data(files=files)
+        
     data = await state.get_data()
     files = data.get("files", [])
-    files.append({"file_id": file_id, "file_type": file_type})
-    await state.update_data(files=files)
+    count = len(files)
     
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -97,7 +178,7 @@ async def process_test_file(message: Message, state: FSMContext):
         ]
     )
     await message.answer(
-        f"📎 Fayl muvaffaqiyatli qabul qilindi. (Jami: {len(files)} ta fayl)\n\n"
+        f"📎 Fayl muvaffaqiyatli qabul qilindi. (Jami: {count} ta fayl)\n\n"
         f"Yana rasm yoki hujjat yuborishingiz mumkin. Barcha fayllarni yuborib bo'lgach, "
         f"quyidagi '📥 Rasmlarni saqlash va davom etish' tugmasini bosing:",
         reply_markup=kb
@@ -155,28 +236,25 @@ async def process_test_keys(message: Message, state: FSMContext):
         return
         
     # Standard clean up
-    # If the user inputted numbered format (e.g. 1a2b3c...)
-    # Let's extract only the letters
     import re
     cleaned = raw_keys.replace(" ", "").replace("\n", "")
+    
+    # Custom starting number detection: check if keys starts with custom numbers e.g. "31a32b"
     if any(char.isdigit() for char in cleaned):
         pairs = re.findall(r"(\d+)([a-d])", cleaned)
         if not pairs:
-            await message.answer("⚠️ Kalit formati noto'g'ri. Masalan: `1a2b3c` formatida yoki shunchaki ketma-ket harflar `abcd` kiriting:")
+            await message.answer("⚠️ Kalit formati noto'g'ri. Masalan: `31a32b33c` formatida kiriting:")
             return
-        # Find maximum question number
-        max_num = max(int(num) for num, char in pairs)
-        parsed = [""] * max_num
-        for num_str, char in pairs:
-            parsed[int(num_str) - 1] = char
-        # Check if there are missing keys
-        if "" in parsed:
-            await message.answer("⚠️ Javoblarda ba'zi savol raqamlari tushib qolgan. Iltimos tekshirib qayta yuboring:")
-            return
-        answer_key = "".join(parsed)
+        # Verify sequential order (we don't strictly require sorting, but save as dictionary or map)
+        # Store answer key as string mapped dynamically, but wait, evaluator will match.
+        # To support non-1 starting number, we store answer key exactly as we parsed.
+        # Let's save a structured object or string. Saving it as "31a32b33c" as is, so the evaluator
+        # can easily parse it!
+        # Wait, what if we also extract starting index?
+        # Let's clean the continuous digits + letter format. Let's make sure it's valid:
+        answer_key = "".join(f"{num}{char}" for num, char in pairs)
     else:
-        # Standard continuous string e.g. "abcdabcd"
-        # Validate that it only contains a, b, c, d
+        # Standard continuous string starting from 1
         if not all(char in "abcd" for char in cleaned):
             await message.answer("⚠️ Kalit faqat a, b, c, d harflaridan iborat bo'lishi kerak. Qaytadan kiriting:")
             return
@@ -185,29 +263,41 @@ async def process_test_keys(message: Message, state: FSMContext):
     await state.update_data(answer_key=answer_key)
     await state.set_state(TestCreationStates.waiting_for_solutions)
     await message.answer(
-        "Test yechimi (video link yoki tushuntirish matni) yuboring.\n"
+        "Test yechimi (video link yoki tushuntirish matni/media) yuboring.\n"
         "Agar yechim bo'lmasa, `none` yuboring:"
     )
 
-@router.message(TestCreationStates.waiting_for_solutions)
+@router.message(TestCreationStates.waiting_for_solutions, F.content_type.in_({'text', 'photo', 'video', 'document'}))
 async def process_test_solutions(message: Message, state: FSMContext):
-    solutions = message.text.strip()
-    if not solutions:
-        await message.answer("Iltimos, matn yuboring yoki `none` deb yozing:")
-        return
+    solutions_text = ""
+    solutions_media = None
+    
+    if message.text:
+        text = message.text.strip()
+        if text.lower() != "none":
+            solutions_text = text
+    elif message.photo:
+        solutions_media = {"file_id": message.photo[-1].file_id, "file_type": "photo"}
+        solutions_text = message.caption or ""
+    elif message.video:
+        solutions_media = {"file_id": message.video.file_id, "file_type": "video"}
+        solutions_text = message.caption or ""
+    elif message.document:
+        solutions_media = {"file_id": message.document.file_id, "file_type": "document"}
+        solutions_text = message.caption or ""
         
-    solutions_text = "" if solutions.lower() == "none" else solutions
-    await state.update_data(solutions_text=solutions_text)
+    await state.update_data(solutions_text=solutions_text, solutions_media=solutions_media)
     
     # Next, ask which channel to assign
     admin_id = message.from_user.id
-    channels = await get_channels_by_admin(admin_id)
+    from database.db import get_test_channels_by_admin
+    channels = await get_test_channels_by_admin(admin_id)
     
     if not channels:
         await state.clear()
         kb = await get_admin_keyboard(admin_id)
         await message.answer(
-            "⚠️ Sizda ulangan kanallar yo'q. Avval '🔗 Kanallar' bo'limida kanal qo'shing, keyin test yarating.",
+            "⚠️ Sizda ulangan test kanallari yo'q. Avval '🔗 Mening kanallarim' bo'limida kanal qo'shing, keyin test yarating.",
             reply_markup=kb
         )
         return
@@ -228,12 +318,11 @@ async def process_test_channel(call: CallbackQuery, state: FSMContext):
     await state.update_data(channel_id=channel_id)
     await state.set_state(TestCreationStates.waiting_for_start_time)
     
-    # Suggest UZB current time for reference
     uzb_now = datetime.datetime.utcnow() + datetime.timedelta(hours=5)
     await call.message.answer(
         f"Test boshlanish vaqtini kiriting.\n"
         f"Format: `YYYY-MM-DD HH:MM` (masalan, `2026-06-30 20:30`)\n\n"
-        f"🕒 Hozirgi UZB vaqti: `{uzb_now.strftime('%Y-%m-%d %H:%M')}`",
+        f"🕒 Hozirgi UZB vaqti: `{(uzb_now).strftime('%Y-%m-%d %H:%M')}`",
         parse_mode="Markdown"
     )
 
@@ -241,18 +330,13 @@ async def process_test_channel(call: CallbackQuery, state: FSMContext):
 async def process_test_start_time(message: Message, state: FSMContext):
     text = message.text.strip()
     try:
-        # User enters local Uzbekistan time (UTC+5)
         local_dt = datetime.datetime.strptime(text, "%Y-%m-%d %H:%M")
-        
-        # Convert local time to UTC for storing & scheduling
         utc_dt = local_dt - datetime.timedelta(hours=5)
-        
-        # Check that the start time is not too far in the past
         if utc_dt < datetime.datetime.utcnow() - datetime.timedelta(minutes=5):
             await message.answer("⚠️ Boshlanish vaqti o'tib ketgan vaqt bo'la olmaydi. Kelajakdagi vaqtni kiriting:")
             return
     except ValueError:
-        await message.answer("⚠️ Noto'g'ri format. Iltimos, `YYYY-MM-DD HH:MM` formatida kiriting (masalan, `2026-06-30 20:30`):")
+        await message.answer("⚠️ Noto'g'ri format. Iltimos, `YYYY-MM-DD HH:MM` formatida kiriting:")
         return
         
     await state.update_data(start_time=utc_dt.isoformat())
@@ -274,14 +358,15 @@ async def process_test_duration(message: Message, state: FSMContext, bot: Bot):
     test_id = generate_test_id()
     admin_id = message.from_user.id
     
-    # Fetch details
     file_ids = data.get('files', [])
     answer_key = data['answer_key']
     solutions_text = data['solutions_text']
+    solutions_media = data.get('solutions_media')
     channel_id = data['channel_id']
     start_time = datetime.datetime.fromisoformat(data['start_time'])
+    test_name = data['test_name']
+    genre_id = data['genre_id']
     
-    # Save to DB
     success = await create_test(
         test_id=test_id,
         creator_id=admin_id,
@@ -290,27 +375,28 @@ async def process_test_duration(message: Message, state: FSMContext, bot: Bot):
         solutions_text=solutions_text,
         channel_id=channel_id,
         start_time=start_time,
-        duration_minutes=duration
+        duration_minutes=duration,
+        test_name=test_name,
+        genre_id=genre_id,
+        solutions_media=solutions_media
     )
     
     await state.clear()
     kb = await get_admin_keyboard(admin_id)
     
     if success:
-        # Schedule the start and stop jobs
         await schedule_test_jobs(bot, test_id, start_time, duration)
-        
-        # Display UZB start time for reference
         local_start = start_time + datetime.timedelta(hours=5)
         await message.answer(
-            f"🎉 **Test muvaffaqiyatli rejalashtirildi!**\n\n"
-            f"📋 Test ID: `{test_id}`\n"
+            f"🎉 <b>Test muvaffaqiyatli rejalashtirildi!</b>\n\n"
+            f"📋 Test nomi: <b>{html.escape(test_name)}</b>\n"
+            f"📋 Test ID: <code>{test_id}</code>\n"
             f"📅 Boshlanishi: {local_start.strftime('%Y-%m-%d %H:%M')} (UZB)\n"
             f"⏱ Davomiyligi: {duration} daqiqa\n"
-            f"🔑 Kalit: `{answer_key.upper()}`\n\n"
+            f"🔑 Kalit: <code>{answer_key.upper()}</code>\n\n"
             f"Bot belgilangan vaqtda testni kanalga avtomatik joylashtiradi.",
             reply_markup=kb,
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
     else:
         await message.answer("⚠️ Test yaratishda xatolik yuz berdi. Iltimos, qaytadan urinib ko'ring.", reply_markup=kb)
@@ -344,23 +430,19 @@ async def process_delete_test(call: CallbackQuery):
         return
         
     test_id = call.data.split(":")[1]
-    
     test = await get_test(test_id)
     if not test:
         await call.message.answer("Test topilmadi.")
         return
         
-    # Secure check: only creator or owner can delete
     if test.get("creator_id") != user_id and not await is_owner(user_id):
         await call.message.answer("⚠️ Siz ushbu testni o'chira olmaysiz.")
         return
         
     success = await delete_test(test_id)
     if success:
-        # Also remove scheduled jobs from APScheduler if running
         try:
             from utils.scheduler import scheduler
-            # Remove start and end jobs
             scheduler.remove_job(f"start_{test_id}")
             scheduler.remove_job(f"end_{test_id}")
         except Exception:

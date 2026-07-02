@@ -1,4 +1,5 @@
 import datetime
+import uuid
 from motor.motor_asyncio import AsyncIOMotorClient
 from config import MONGO_URI, OWNER_ID
 
@@ -8,16 +9,20 @@ db = client['dtm_test_bot']
 # Collections
 users_col = db['users']
 admins_col = db['admins']
-channels_col = db['channels']
+mandatory_channels_col = db['mandatory_channels']
+test_channels_col = db['test_channels']
 tests_col = db['tests']
 submissions_col = db['submissions']
 settings_col = db['settings']
+genres_col = db['genres']
 
 async def init_db():
     """Initialize database indexes"""
     await users_col.create_index("tg_id", unique=True)
     await tests_col.create_index("test_id", unique=True)
-    await channels_col.create_index("channel_id", unique=True)
+    await mandatory_channels_col.create_index("channel_id", unique=True)
+    await test_channels_col.create_index("channel_id", unique=True)
+    await genres_col.create_index("genre_id", unique=True)
     await submissions_col.create_index([("user_id", 1), ("test_id", 1)], unique=True)
 
 # --- Admin Helpers ---
@@ -121,10 +126,58 @@ async def get_users_breakdown() -> dict:
         breakdown[region]["Total"] += count
     return breakdown
 
-# --- Channel Helpers (For Forced Subscription) ---
-async def add_channel(channel_id: int, invite_link: str, title: str, added_by: int) -> bool:
+# --- Mandatory Channel Helpers (For Forced Subscription) ---
+async def add_mandatory_channel(channel_id: int, invite_link: str, title: str, added_by: int) -> bool:
     try:
-        await channels_col.update_one(
+        await mandatory_channels_col.update_one(
+            {"channel_id": channel_id},
+            {"$set": {
+                "invite_link": invite_link,
+                "title": title,
+                "added_by": added_by,
+                "is_active": True
+            }},
+            upsert=True
+        )
+        return True
+    except Exception:
+        return False
+
+async def remove_mandatory_channel(channel_id: int) -> bool:
+    res = await mandatory_channels_col.delete_one({"channel_id": channel_id})
+    return res.deleted_count > 0
+
+async def get_all_mandatory_channels() -> list:
+    channels = []
+    async for channel in mandatory_channels_col.find({}):
+        channels.append(channel)
+    return channels
+
+async def get_active_mandatory_channels() -> list:
+    channels = []
+    async for channel in mandatory_channels_col.find({"is_active": {"$ne": False}}):
+        channels.append(channel)
+    return channels
+
+async def toggle_mandatory_channel_status(channel_id: int) -> bool:
+    channel = await mandatory_channels_col.find_one({"channel_id": channel_id})
+    if not channel:
+        return False
+    new_status = not channel.get("is_active", True)
+    await mandatory_channels_col.update_one({"channel_id": channel_id}, {"$set": {"is_active": new_status}})
+    return True
+
+async def get_mandatory_channel(channel_id: int) -> dict:
+    return await mandatory_channels_col.find_one({"channel_id": channel_id})
+
+# Backward compatibility map
+async def get_all_channels() -> list:
+    return await get_active_mandatory_channels()
+
+# --- Test Channel Helpers ---
+async def add_test_channel(channel_id: int, invite_link: str, title: str, added_by: int) -> bool:
+    try:
+        await test_channels_col.update_one(
             {"channel_id": channel_id},
             {"$set": {
                 "invite_link": invite_link,
@@ -137,26 +190,29 @@ async def add_channel(channel_id: int, invite_link: str, title: str, added_by: i
     except Exception:
         return False
 
-async def remove_channel(channel_id: int) -> bool:
-    res = await channels_col.delete_one({"channel_id": channel_id})
+async def remove_test_channel(channel_id: int) -> bool:
+    res = await test_channels_col.delete_one({"channel_id": channel_id})
     return res.deleted_count > 0
 
-async def get_all_channels() -> list:
+async def get_all_test_channels() -> list:
     channels = []
-    async for channel in channels_col.find({}):
+    async for channel in test_channels_col.find({}):
         channels.append(channel)
     return channels
+
+async def get_test_channels_by_admin(admin_id: int) -> list:
+    if admin_id == OWNER_ID:
+        return await get_all_test_channels()
+    channels = []
+    async for channel in test_channels_col.find({"added_by": admin_id}):
+        channels.append(channel)
+    return channels
+
+async def get_test_channel(channel_id: int) -> dict:
+    return await test_channels_col.find_one({"channel_id": channel_id})
 
 async def get_channels_by_admin(admin_id: int) -> list:
-    if admin_id == OWNER_ID:
-        return await get_all_channels()
-    channels = []
-    async for channel in channels_col.find({"added_by": admin_id}):
-        channels.append(channel)
-    return channels
-
-async def get_channel(channel_id: int) -> dict:
-    return await channels_col.find_one({"channel_id": channel_id})
+    return await get_test_channels_by_admin(admin_id)
 
 # --- Global Footer Settings ---
 async def get_global_footer() -> str:
@@ -170,10 +226,37 @@ async def set_global_footer(text: str):
         upsert=True
     )
 
+# --- Genre Helpers ---
+async def add_genre(name: str, added_by: int) -> bool:
+    genre_id = str(uuid.uuid4())[:8]
+    try:
+        await genres_col.insert_one({
+            "genre_id": genre_id,
+            "name": name,
+            "added_by": added_by,
+            "created_at": datetime.datetime.utcnow()
+        })
+        return True
+    except Exception:
+        return False
+
+async def delete_genre(genre_id: str) -> bool:
+    res = await genres_col.delete_one({"genre_id": genre_id})
+    return res.deleted_count > 0
+
+async def get_all_genres() -> list:
+    genres = []
+    async for genre in genres_col.find({}):
+        genres.append(genre)
+    return genres
+
+async def get_genre(genre_id: str) -> dict:
+    return await genres_col.find_one({"genre_id": genre_id})
+
 # --- Test Helpers ---
 async def create_test(test_id: str, creator_id: int, file_ids: list, answer_key: str, 
                       solutions_text: str, channel_id: int, start_time: datetime.datetime, 
-                      duration_minutes: int) -> bool:
+                      duration_minutes: int, test_name: str, genre_id: str, solutions_media: dict = None) -> bool:
     try:
         await tests_col.insert_one({
             "test_id": test_id,
@@ -181,12 +264,15 @@ async def create_test(test_id: str, creator_id: int, file_ids: list, answer_key:
             "file_ids": file_ids,
             "answer_key": answer_key.lower(),
             "solutions_text": solutions_text,
+            "solutions_media": solutions_media,
             "channel_id": channel_id,
             "start_time": start_time,
             "duration_minutes": duration_minutes,
             "status": "scheduled",  # scheduled, active, finished
             "test_post_msg_id": None,
-            "created_at": datetime.datetime.utcnow()
+            "created_at": datetime.datetime.utcnow(),
+            "test_name": test_name,
+            "genre_id": genre_id
         })
         return True
     except Exception:

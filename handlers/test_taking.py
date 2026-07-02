@@ -1,4 +1,6 @@
 import datetime
+import html
+import re
 from aiogram import Router, F, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, User
@@ -9,6 +11,37 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+def parse_answer_key_to_dict(answer_key: str) -> dict:
+    """
+    Parses answer key (e.g., '31a32b33c' or 'abcd') to a dict of {question_number: letter}.
+    """
+    cleaned = answer_key.strip().lower().replace(" ", "").replace("\n", "")
+    if any(char.isdigit() for char in cleaned):
+        pairs = re.findall(r"(\d+)([a-d])", cleaned)
+        return {int(num): char for num, char in pairs}
+    else:
+        return {i: char for i, char in enumerate(cleaned, start=1)}
+
+def parse_user_answers(user_input: str, correct_dict: dict) -> dict:
+    """
+    Parses user answers and returns a dict of {question_number: letter}.
+    If the input contains no numbers (e.g., "abc"), maps them sequentially
+    to the sorted list of question numbers from correct_dict.
+    """
+    cleaned = user_input.lower().replace(" ", "").replace("\n", "").replace(",", "").replace("\r", "")
+    
+    if any(char.isdigit() for char in cleaned):
+        pairs = re.findall(r"(\d+)\s*[-:)]?\s*([a-d])", cleaned)
+        return {int(num): char for num, char in pairs}
+    else:
+        sorted_nums = sorted(correct_dict.keys())
+        user_dict = {}
+        letters = [c for c in cleaned if c in "abcd"]
+        for idx, num in enumerate(sorted_nums):
+            if idx < len(letters):
+                user_dict[num] = letters[idx]
+        return user_dict
 
 async def start_test_taking(message: Message, user: User, test_id: str, state: FSMContext):
     await state.clear()
@@ -32,6 +65,8 @@ async def start_test_taking(message: Message, user: User, test_id: str, state: F
         await message.answer("⚠️ Siz ushbu testga javob topshirib bo'lgansiz. Qayta topshirish taqiqlanadi.")
         return
         
+    correct_dict = parse_answer_key_to_dict(test['answer_key'])
+    
     # Start FSM state
     await state.set_state(TestTakingStates.waiting_for_answers)
     await state.update_data(
@@ -40,15 +75,17 @@ async def start_test_taking(message: Message, user: User, test_id: str, state: F
     )
     
     cancel_kb = get_cancel_keyboard()
+    start_num = min(correct_dict.keys())
     await message.answer(
-        f"📝 **Test boshlandi!**\n\n"
-        f"Test ID: `{test_id}`\n"
-        f"Savollar soni: {len(test['answer_key'])}\n"
+        f"📝 <b>Test boshlandi!</b>\n\n"
+        f"Test nomi: <b>{html.escape(test.get('test_name', 'Nomsiz test'))}</b>\n"
+        f"Test ID: <code>{test_id}</code>\n"
+        f"Savollar soni: {len(correct_dict)}\n"
         f"Davomiyligi: {test['duration_minutes']} daqiqa\n\n"
         f"Quyida test savollari fayli yuborilmoqda. Javoblarni quyidagi formatda yuboring:\n"
-        f"👉 `abcd...` (masalan, `abcdabcd...` yoki `1a2b3c...`)",
+        f"👉 <code>abcd...</code> (masalan, <code>abcdabcd...</code> yoki <code>{start_num}a{start_num+1}b...</code>)",
         reply_markup=cancel_kb,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     
     # Send test files
@@ -67,29 +104,6 @@ async def start_test_taking(message: Message, user: User, test_id: str, state: F
         except Exception as e:
             logger.error(f"Error sending test file {f_id} to user {user.id}: {e}")
             await message.answer("⚠️ Test savollari faylini yuborishda xatolik yuz berdi, lekin javoblaringizni yuborishingiz mumkin.")
-
-def parse_answers(user_input: str, total_questions: int) -> str:
-    """
-    Cleans and parses user input.
-    Supports continuous letters (abcd...) or numbered format (1a2b3c...).
-    Returns a cleaned string of answers.
-    """
-    cleaned = user_input.replace(" ", "").replace("\n", "").lower()
-    
-    # If the user inputted numbered format (e.g. 1a2b3c...)
-    # Let's extract only the letters
-    if any(char.isdigit() for char in cleaned):
-        parsed = [""] * total_questions
-        import re
-        # Find all patterns of number+letter (e.g., 1a, 2b, 12c)
-        pairs = re.findall(r"(\d+)([a-d])", cleaned)
-        for num_str, char in pairs:
-            idx = int(num_str) - 1
-            if 0 <= idx < total_questions:
-                parsed[idx] = char
-        return "".join(parsed)
-    
-    return cleaned
 
 @router.message(TestTakingStates.waiting_for_answers)
 async def process_test_answers(message: Message, state: FSMContext):
@@ -116,25 +130,27 @@ async def process_test_answers(message: Message, state: FSMContext):
         await message.answer("⚠️ Kechirasiz, ushbu test uchun vaqt tugadi va javoblar qabul qilinishi to'xtatildi.", reply_markup=kb)
         return
         
-    total_questions = len(test['answer_key'])
-    answers = parse_answers(user_input, total_questions)
+    correct_dict = parse_answer_key_to_dict(test['answer_key'])
+    user_dict = parse_user_answers(user_input, correct_dict)
     
-    # Validation: if length doesn't match total questions
-    if len(answers) != total_questions or "" in answers:
-        # Check raw input length vs expected length
+    total_questions = len(correct_dict)
+    expected_nums = set(correct_dict.keys())
+    user_answered_nums = set(user_dict.keys())
+    
+    # Validation: if length doesn't match total questions or numbers don't match
+    if len(user_dict) != total_questions or not expected_nums.issubset(user_answered_nums):
         await message.answer(
-            f"⚠️ **Xatolik:** Siz yuborgan javoblar soni mos kelmadi.\n"
-            f"Kutilayotgan savollar soni: {total_questions}\n"
-            f"Siz yuborganingiz: {len(answers)}\n\n"
-            f"Iltimos, qaytadan tekshirib, to'liq va faqat `a, b, c, d` harflaridan iborat javoblarni yuboring."
+            f"⚠️ <b>Xatolik:</b> Siz yuborgan javoblar soni yoki tartibi mos kelmadi.\n"
+            f"Kutilayotgan savollar oralig'i: <b>{min(expected_nums)}-{max(expected_nums)}</b> ({total_questions} ta savol)\n"
+            f"Siz yuborganingiz: {len(user_dict)} ta savol\n\n"
+            f"Iltimos, qaytadan tekshirib, to'liq javob yuboring."
         )
         return
         
     # Calculate scores
-    correct_key = test['answer_key']
     correct_count = 0
-    for i in range(total_questions):
-        if answers[i] == correct_key[i]:
+    for num, correct_char in correct_dict.items():
+        if user_dict.get(num) == correct_char:
             correct_count += 1
             
     score = round((correct_count / total_questions) * 100, 2)
@@ -144,11 +160,14 @@ async def process_test_answers(message: Message, state: FSMContext):
     duration = datetime.datetime.utcnow() - started_at
     time_taken_seconds = int(duration.total_seconds())
     
+    # Format answers string for saving
+    user_answers_str = "".join(f"{num}{char}" for num, char in sorted(user_dict.items()))
+    
     # Save submission
     success = await create_submission(
         user_id=message.from_user.id,
         test_id=test_id,
-        answers=answers,
+        answers=user_answers_str,
         score=score,
         correct_count=correct_count,
         total_count=total_questions,
@@ -167,11 +186,11 @@ async def process_test_answers(message: Message, state: FSMContext):
     time_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
     
     await message.answer(
-        f"✅ **Javoblaringiz qabul qilindi!**\n\n"
-        f"📋 Test ID: `{test_id}`\n"
-        f"📊 Natijangiz: **{score}%**\n"
+        f"✅ <b>Javoblaringiz qabul qilindi!</b>\n\n"
+        f"📋 Test ID: <code>{test_id}</code>\n"
+        f"📊 Natijangiz: <b>{score}%</b>\n"
         f"✅ To'g'ri javoblar: {correct_count}/{total_questions}\n"
         f"⏱ Sarflangan vaqt: {time_str}{footer_text}",
         reply_markup=kb,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )

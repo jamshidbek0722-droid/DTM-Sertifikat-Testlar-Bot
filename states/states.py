@@ -15,10 +15,20 @@ class AdminStates(StatesGroup):
     waiting_for_channel_link = State()
     waiting_for_channel_title = State()
     
+    # Test channel adding states
+    waiting_for_test_channel_id = State()
+    waiting_for_test_channel_link = State()
+    waiting_for_test_channel_title = State()
+    
+    # Genre adding state
+    waiting_for_genre_name = State()
+    
     waiting_for_broadcast_msg = State()
     waiting_for_footer_text = State()
 
 class TestCreationStates(StatesGroup):
+    waiting_for_test_name = State()
+    waiting_for_genre = State()
     waiting_for_file = State()
     waiting_for_keys = State()
     waiting_for_solutions = State()

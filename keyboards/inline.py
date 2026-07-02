@@ -1,3 +1,4 @@
+import datetime
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def get_complete_profile_keyboard() -> InlineKeyboardMarkup:
@@ -90,4 +91,61 @@ def get_subjects_keyboard(selected_subjects: list) -> InlineKeyboardMarkup:
             )
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text="📥 Saqlash", callback_data="save_subjects")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# --- Genre and Completed Test Management Keyboards ---
+
+def get_genre_selection_keyboard(genres: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for g in genres:
+        buttons.append([InlineKeyboardButton(text=g["name"], callback_data=f"create_test_genre:{g['genre_id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_past_genres_keyboard(genres: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for g in genres:
+        buttons.append([InlineKeyboardButton(text=g["name"], callback_data=f"past_genre:{g['genre_id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_past_tests_keyboard(tests: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for t in tests:
+        # local time representation (UTC+5)
+        local_time = t.get("start_time") + datetime.timedelta(hours=5) if t.get("start_time") else datetime.datetime.now()
+        date_str = local_time.strftime("%d.%m %H:%M")
+        name = t.get("test_name", "Nomsiz test")
+        btn_text = f"📝 {name} ({date_str})"
+        buttons.append([InlineKeyboardButton(text=btn_text, callback_data=f"view_past_test:{t['test_id']}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_mandatory_channels_manage_keyboard(channels: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for ch in channels:
+        status_emoji = "✅" if ch.get("is_active", True) else "❌"
+        buttons.append([
+            InlineKeyboardButton(text=f"{ch['title']}", url=ch.get("invite_link", "https://t.me")),
+            InlineKeyboardButton(text=f"Holat: {status_emoji}", callback_data=f"toggle_mchan:{ch['channel_id']}"),
+            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"del_mchan:{ch['channel_id']}")
+        ])
+    buttons.append([InlineKeyboardButton(text="➕ Kanal qo'shish", callback_data="add_mchan")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_test_channels_manage_keyboard(channels: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for ch in channels:
+        buttons.append([
+            InlineKeyboardButton(text=f"{ch['title']}", url=ch.get("invite_link", "https://t.me")),
+            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"del_tchan:{ch['channel_id']}")
+        ])
+    buttons.append([InlineKeyboardButton(text="➕ Yangi kanal qo'shish", callback_data="add_tchan")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def get_genres_manage_keyboard(genres: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for g in genres:
+        buttons.append([
+            InlineKeyboardButton(text=g["name"], callback_data="noop"),
+            InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"del_genre:{g['genre_id']}")
+        ])
+    buttons.append([InlineKeyboardButton(text="➕ Yangi janr qo'shish", callback_data="add_genre")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

@@ -25,13 +25,14 @@ async def get_admin_keyboard(user_id: int) -> ReplyKeyboardMarkup:
             [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📝 Testlarni boshqarish")],
             [KeyboardButton(text="📢 Xabar yuborish"), KeyboardButton(text="🔗 Majburiy obunalar")],
             [KeyboardButton(text="🏷 Footer sozlamalari"), KeyboardButton(text="👮 Adminlarni boshqarish")],
-            [KeyboardButton(text="🔙 Asosiy menyu")]
+            [KeyboardButton(text="📚 Janrlarni boshqarish"), KeyboardButton(text="🔙 Asosiy menyu")]
         ]
     else:
-        # Standard admins: only Stats, Test Management, and My Channels
+        # Standard admins: only Stats, Test Management, My Channels, and Genre Management
         buttons = [
             [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="📝 Testlarni boshqarish")],
-            [KeyboardButton(text="🔗 Mening kanallarim"), KeyboardButton(text="🔙 Asosiy menyu")]
+            [KeyboardButton(text="🔗 Mening kanallarim"), KeyboardButton(text="📚 Janrlarni boshqarish")],
+            [KeyboardButton(text="🔙 Asosiy menyu")]
         ]
         
     return ReplyKeyboardMarkup(

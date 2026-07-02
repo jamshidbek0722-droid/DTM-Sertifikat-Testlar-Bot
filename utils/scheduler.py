@@ -1,8 +1,10 @@
 import datetime
+import html
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.media_group import MediaGroupBuilder
 from database.db import (
     get_test, update_test_status, update_test_post_msg_id, get_submissions_for_test,
     get_user, get_global_footer, tests_col
@@ -38,11 +40,14 @@ async def start_test_job(bot: Bot, test_id: str):
     footer = await get_global_footer()
     footer_text = f"\n\n{footer}" if footer else ""
     
+    test_name = test.get("test_name", "Nomsiz test")
+    
     caption = (
-        f"📝 **YANGI TEST BOSHLANDI!**\n\n"
-        f"📋 Test ID: `{test_id}`\n"
-        f"✍️ Savollar soni: **{len(test['answer_key'])}** ta\n"
-        f"⏱ Vaqt: **{test['duration_minutes']}** daqiqa\n\n"
+        f"<b>{html.escape(test_name)}</b>\n\n"
+        f"📝 <b>YANGI TEST BOSHLANDI!</b>\n\n"
+        f"📋 Test ID: <code>{test_id}</code>\n"
+        f"✍️ Savollar soni: <b>{len(test['answer_key'])}</b> ta\n"
+        f"⏱ Vaqt: <b>{test['duration_minutes']}</b> daqiqa\n\n"
         f"Javoblaringizni yuborish uchun quyidagi tugmani bosing va botga o'ting:👇{footer_text}"
     )
     
@@ -60,8 +65,29 @@ async def start_test_job(bot: Bot, test_id: str):
     sent_msg = None
     
     try:
-        if file_ids:
-            # Post the first file with the main caption and deep link keyboard
+        # Check if we have multiple photos to group as Album
+        if len(file_ids) > 1 and all(f.get("file_type") == "photo" for f in file_ids):
+            media_group = MediaGroupBuilder(caption=caption, parse_mode="HTML")
+            for f in file_ids:
+                media_group.add_photo(media=f["file_id"])
+            sent_msgs = await bot.send_media_group(chat_id=channel_id, media=media_group.build())
+            if sent_msgs:
+                sent_msg = sent_msgs[0]
+                await update_test_post_msg_id(test_id, sent_msg.message_id)
+                logger.info(f"Test {test_id} successfully posted as Album to channel {channel_id}.")
+                
+                # Send a companion message with the inline keyboard
+                try:
+                    await bot.send_message(
+                        chat_id=channel_id,
+                        text=f"✍️ <b>{html.escape(test_name)}</b> testiga javob yuborish uchun quyidagi tugmani bosing:",
+                        reply_markup=kb,
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+        elif file_ids:
+            # Post single file or sequential fallback
             first_file = file_ids[0]
             f_id = first_file.get("file_id")
             f_type = first_file.get("file_type", "document")
@@ -72,7 +98,15 @@ async def start_test_job(bot: Bot, test_id: str):
                     photo=f_id,
                     caption=caption,
                     reply_markup=kb,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
+                )
+            elif f_type == "video":
+                sent_msg = await bot.send_video(
+                    chat_id=channel_id,
+                    video=f_id,
+                    caption=caption,
+                    reply_markup=kb,
+                    parse_mode="HTML"
                 )
             else:
                 sent_msg = await bot.send_document(
@@ -80,14 +114,14 @@ async def start_test_job(bot: Bot, test_id: str):
                     document=f_id,
                     caption=caption,
                     reply_markup=kb,
-                    parse_mode="Markdown"
+                    parse_mode="HTML"
                 )
                 
             if sent_msg:
                 await update_test_post_msg_id(test_id, sent_msg.message_id)
                 logger.info(f"Test {test_id} successfully posted to channel {channel_id}.")
                 
-            # Post any additional files linked to this test
+            # Post any additional non-photo files sequentially
             for idx, item in enumerate(file_ids[1:], start=2):
                 f_id = item.get("file_id")
                 f_type = item.get("file_type", "document")
@@ -96,16 +130,35 @@ async def start_test_job(bot: Bot, test_id: str):
                         await bot.send_photo(
                             chat_id=channel_id,
                             photo=f_id,
-                            caption=f"📊 Test ID: `{test_id}` (davomi - {idx}-fayl)"
+                            caption=f"📊 Test ID: <code>{test_id}</code> (davomi - {idx}-fayl)",
+                            parse_mode="HTML"
+                        )
+                    elif f_type == "video":
+                        await bot.send_video(
+                            chat_id=channel_id,
+                            video=f_id,
+                            caption=f"📊 Test ID: <code>{test_id}</code> (davomi - {idx}-fayl)",
+                            parse_mode="HTML"
                         )
                     else:
                         await bot.send_document(
                             chat_id=channel_id,
                             document=f_id,
-                            caption=f"📊 Test ID: `{test_id}` (davomi - {idx}-fayl)"
+                            caption=f"📊 Test ID: <code>{test_id}</code> (davomi - {idx}-fayl)",
+                            parse_mode="HTML"
                         )
                 except Exception as e:
                     logger.error(f"Failed to post additional file {f_id} to channel {channel_id}: {e}")
+        else:
+            # Post text only if no files
+            sent_msg = await bot.send_message(
+                chat_id=channel_id,
+                text=caption,
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+            if sent_msg:
+                await update_test_post_msg_id(test_id, sent_msg.message_id)
     except Exception as e:
         logger.error(f"Failed to post test {test_id} to channel {channel_id}: {e}")
 
@@ -127,29 +180,29 @@ async def end_test_job(bot: Bot, test_id: str):
     submissions = await get_submissions_for_test(test_id)
     channel_id = test["channel_id"]
     post_msg_id = test.get("test_post_msg_id")
+    test_name = test.get("test_name", "Nomsiz test")
     
     leaderboard = (
-        f"🏁 **TEST YAKUNLANDI!**\n"
-        f"📋 Test ID: `{test_id}`\n\n"
-        f"🏆 **Natijalar (Top 20):**\n"
+        f"🏁 <b>TEST YAKUNLANDI!</b>\n"
+        f"📝 Test nomi: <b>{html.escape(test_name)}</b>\n"
+        f"📋 Test ID: <code>{test_id}</code>\n\n"
+        f"🏆 <b>Natijalar (Top 20):</b>\n"
     )
     
     if not submissions:
         leaderboard += "Ushbu testda hech kim ishtirok etmadi."
     else:
-        # Show top 20 users
         for idx, sub in enumerate(submissions[:20], 1):
             user = await get_user(sub["user_id"])
             user_name = user.get("name", "Foydalanuvchi") if user else "Foydalanuvchi"
-            # Format duration
             t_seconds = sub.get("time_taken_seconds", 0)
             mins = t_seconds // 60
             secs = t_seconds % 60
             time_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
             
-            leaderboard += f"{idx}. **{user_name}** — {sub['correct_count']}/{sub['total_count']} ({sub['score']}%) [⏱ {time_str}]\n"
+            leaderboard += f"{idx}. <b>{html.escape(user_name)}</b> — {sub['correct_count']}/{sub['total_count']} ({sub['score']}%) [⏱ {time_str}]\n"
             
-        leaderboard += f"\n📥 Jami ishtirokchilar soni: **{len(submissions)}** ta"
+        leaderboard += f"\n📥 Jami ishtirokchilar soni: <b>{len(submissions)}</b> ta"
         
     footer = await get_global_footer()
     if footer:
@@ -162,13 +215,13 @@ async def end_test_job(bot: Bot, test_id: str):
                 chat_id=channel_id,
                 text=leaderboard,
                 reply_to_message_id=post_msg_id,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         else:
             await bot.send_message(
                 chat_id=channel_id,
                 text=leaderboard,
-                parse_mode="Markdown"
+                parse_mode="HTML"
             )
         logger.info(f"Leaderboard for test {test_id} posted to channel {channel_id}.")
     except Exception as e:
@@ -176,29 +229,46 @@ async def end_test_job(bot: Bot, test_id: str):
         
     # Post solutions if provided
     solutions = test.get("solutions_text")
-    if solutions:
-        solutions_msg = (
-            f"💡 **Test ID `{test_id}` yechimlari:**\n\n"
-            f"{solutions}"
-        )
-        if footer:
-            solutions_msg += f"\n\n{footer}"
-            
+    solutions_media = test.get("solutions_media")
+    footer_text = f"\n\n{footer}" if footer else ""
+    
+    if solutions or solutions_media:
+        caption_sol = f"💡 <b>Test ID <code>{test_id}</code> yechimlari:</b>\n\n{solutions or ''}{footer_text}"
         try:
-            if post_msg_id:
-                await bot.send_message(
-                    chat_id=channel_id,
-                    text=solutions_msg,
-                    reply_to_message_id=post_msg_id,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
-                )
+            if solutions_media:
+                f_id = solutions_media.get("file_id")
+                f_type = solutions_media.get("file_type")
+                if f_type == "photo":
+                    await bot.send_photo(
+                        chat_id=channel_id,
+                        photo=f_id,
+                        caption=caption_sol,
+                        parse_mode="HTML",
+                        reply_to_message_id=post_msg_id if post_msg_id else None
+                    )
+                elif f_type == "video":
+                    await bot.send_video(
+                        chat_id=channel_id,
+                        video=f_id,
+                        caption=caption_sol,
+                        parse_mode="HTML",
+                        reply_to_message_id=post_msg_id if post_msg_id else None
+                    )
+                else:
+                    await bot.send_document(
+                        chat_id=channel_id,
+                        document=f_id,
+                        caption=caption_sol,
+                        parse_mode="HTML",
+                        reply_to_message_id=post_msg_id if post_msg_id else None
+                    )
             else:
                 await bot.send_message(
                     chat_id=channel_id,
-                    text=solutions_msg,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
+                    text=caption_sol,
+                    parse_mode="HTML",
+                    disable_web_page_preview=True,
+                    reply_to_message_id=post_msg_id if post_msg_id else None
                 )
             logger.info(f"Solutions for test {test_id} posted.")
         except Exception as e:

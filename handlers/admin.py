@@ -1,3 +1,5 @@
+import html
+import logging
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -5,17 +7,22 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from database.db import (
     is_admin, is_owner, get_total_users_count, get_registered_users_count, get_users_breakdown,
     get_total_tests_count, get_total_submissions_count, add_admin, remove_admin, get_all_admins,
-    add_channel, remove_channel, get_channels_by_admin, get_all_channels, get_global_footer,
-    set_global_footer, tests_col, submissions_col, users_col
+    get_global_footer, set_global_footer, tests_col, submissions_col, users_col,
+    add_mandatory_channel, remove_mandatory_channel, get_all_mandatory_channels, get_mandatory_channel,
+    add_test_channel, remove_test_channel, get_all_test_channels, get_test_channels_by_admin, get_test_channel,
+    add_genre, delete_genre, get_all_genres, test_channels_col
 )
 from states.states import AdminStates
 from keyboards.reply import get_admin_keyboard, get_main_keyboard, get_cancel_keyboard
-import logging
+from keyboards.inline import (
+    get_mandatory_channels_manage_keyboard, get_test_channels_manage_keyboard, get_genres_manage_keyboard
+)
+from config import OWNER_ID
 
 logger = logging.getLogger(__name__)
 router = Router()
 
-# Admin check decorator or helper
+# Admin check helper
 async def check_admin_auth(message: Message) -> bool:
     if not await is_admin(message.from_user.id):
         await message.answer("⚠️ Sizda ushbu bo'limga kirish huquqi yo'q.")
@@ -53,7 +60,6 @@ async def show_statistics(message: Message):
     is_super = await is_owner(user_id)
     
     if is_super:
-        # Global Statistics for Super Admin
         tot_users = await get_total_users_count()
         reg_users = await get_registered_users_count()
         tot_tests = await get_total_tests_count()
@@ -61,201 +67,318 @@ async def show_statistics(message: Message):
         breakdown = await get_users_breakdown()
         
         text = (
-            f"📊 **Global Bot Statistikasi (Super Admin):**\n\n"
-            f"👥 Jami foydalanuvchilar: **{tot_users}**\n"
-            f"✅ Ro'yxatdan o'tganlar: **{reg_users}**\n"
-            f"📝 Jami yaratilgan testlar: **{tot_tests}**\n"
-            f"📥 Jami javob topshirganlar: **{tot_subs}**\n\n"
-            f"📍 **Hududlar va Jins bo'yicha taqsimot:**\n"
+            f"📊 <b>Global Bot Statistikasi (Super Admin):</b>\n\n"
+            f"👥 Jami foydalanuvchilar: <b>{tot_users}</b>\n"
+            f"✅ Ro'yxatdan o'tganlar: <b>{reg_users}</b>\n"
+            f"📝 Jami yaratilgan testlar: <b>{tot_tests}</b>\n"
+            f"📥 Jami javob topshirganlar: <b>{tot_subs}</b>\n\n"
+            f"📍 <b>Hududlar va Jins bo'yicha taqsimot:</b>\n"
         )
         if not breakdown:
-            text += "Ma'lumotlar mavjud emas."
+            text += "Ma'lumotlar mavjud emas.\n"
         for region, data in breakdown.items():
-            text += f"- {region}: **{data['Total']}** (🙋‍♂️ Erkak: {data.get('Male', 0)}, 🙋‍♀️ Ayol: {data.get('Female', 0)})\n"
+            text += f"- {region}: <b>{data['Total']}</b> (🙋‍♂️ Erkak: {data.get('Male', 0)}, 🙋‍♀️ Ayol: {data.get('Female', 0)})\n"
             
-        await message.answer(text, parse_mode="Markdown")
+        # Admin breakdown tracking
+        text += "\n👮 <b>Adminlar faoliyati taqsimoti:</b>\n"
+        admins = await get_all_admins()
+        
+        # Super admin activity
+        owner_ch_count = await test_channels_col.count_documents({"added_by": OWNER_ID})
+        owner_tests_count = await tests_col.count_documents({"creator_id": OWNER_ID})
+        text += f"- Super Admin (ID: <code>{OWNER_ID}</code>):\n"
+        text += f"  📢 Qo'shgan kanallari: <b>{owner_ch_count}</b>, Yaratgan testlari: <b>{owner_tests_count}</b>\n"
+        
+        for adm in admins:
+            adm_id = adm["tg_id"]
+            ch_count = await test_channels_col.count_documents({"added_by": adm_id})
+            tests_count = await tests_col.count_documents({"creator_id": adm_id})
+            text += f"- Admin (ID: <code>{adm_id}</code>):\n"
+            text += f"  📢 Qo'shgan kanallari: <b>{ch_count}</b>, Yaratgan testlari: <b>{tests_count}</b>\n"
+            
+        await message.answer(text, parse_mode="HTML")
     else:
-        # Standard Admin Personal Stats
-        # Get tests created by this admin
+        personal_tests_count = await tests_col.count_documents({"creator_id": user_id})
+        personal_ch_count = await test_channels_col.count_documents({"added_by": user_id})
+        
         cursor = tests_col.find({"creator_id": user_id})
         admin_tests = await cursor.to_list(length=None)
         test_ids = [t["test_id"] for t in admin_tests]
-        
-        personal_tests_count = len(admin_tests)
         personal_subs_count = 0
         if test_ids:
             personal_subs_count = await submissions_col.count_documents({"test_id": {"$in": test_ids}})
             
-        # Get channels added by this admin
-        personal_ch_count = len(await get_channels_by_admin(user_id))
-        
         text = (
-            f"📊 **Sizning Statistikangiz (Admin):**\n\n"
-            f"📝 Yaratgan testlaringiz soni: **{personal_tests_count}**\n"
-            f"📥 Testlaringizga yuborilgan jami javoblar: **{personal_subs_count}**\n"
-            f"📢 Ulangan shaxsiy kanallaringiz: **{personal_ch_count}**\n"
+            f"📊 <b>Sizning Statistikangiz (Admin):</b>\n\n"
+            f"📝 Yaratgan testlaringiz soni: <b>{personal_tests_count}</b>\n"
+            f"📥 Testlaringizga yuborilgan jami javoblar: <b>{personal_subs_count}</b>\n"
+            f"📢 Ulangan shaxsiy kanallaringiz: <b>{personal_ch_count}</b>\n"
         )
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="HTML")
 
-# --- Mandatory Subs / My Channels Manager ---
+# --- Mandatory Subscriptions Panel (Super Admin Only) ---
 
-@router.message(F.text.in_({"🔗 Majburiy obunalar", "🔗 Mening kanallarim"}))
-async def manage_channels(message: Message):
-    if not await check_admin_auth(message):
+@router.message(F.text == "🔗 Majburiy obunalar")
+async def manage_mandatory_subs(message: Message):
+    if not await check_owner_auth(message):
         return
-        
-    user_id = message.from_user.id
-    is_super = await is_owner(user_id)
-    
-    # Restrict Mandatory Subs button to super-admin and My Channels to standard-admin (for clean UI, but either gets their respective channels)
-    if message.text == "🔗 Majburiy obunalar" and not is_super:
-        await message.answer("⚠️ Sizda bu bo'limga ruxsat yo'q.")
-        return
-        
-    channels = await get_channels_by_admin(user_id)
-    
-    title_text = "🔗 **Siz ulagan kanallar:**\n\n" if not is_super else "🔗 **Majburiy a'zolik kanallari (Global):**\n\n"
-    
-    text = title_text
+    channels = await get_all_mandatory_channels()
+    text = "🔗 <b>Majburiy obunalar (Global):</b>\n\n"
     if not channels:
-        text += "Hozirda hech qanday kanal ulanmagan."
+        text += "Hozirda hech qanday majburiy kanal ulanmagan."
     else:
         for idx, ch in enumerate(channels, 1):
-            text += f"{idx}. **{ch['title']}** (ID: `{ch['channel_id']}`)\n   🔗 Havola: {ch['invite_link']}\n"
-            if is_super:
-                text += f"   👮 Qo'shdi: Admin ID `{ch.get('added_by', 'Owner')}`\n"
-            text += "\n"
+            status = "✅ Faol" if ch.get("is_active", True) else "❌ O'chirilgan"
+            text += f"{idx}. <b>{ch['title']}</b> (ID: <code>{ch['channel_id']}</code>)\n   Holati: {status}\n\n"
             
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="➕ Kanal Qo'shish", callback_data="admin_add_channel"),
-                InlineKeyboardButton(text="🗑 Kanalni O'chirish", callback_data="admin_remove_channel")
-            ]
-        ]
-    )
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    kb = get_mandatory_channels_manage_keyboard(channels)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
-@router.callback_query(F.data == "admin_add_channel")
-async def start_add_channel(call: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "add_mchan")
+async def start_add_mchan(call: CallbackQuery, state: FSMContext):
     await call.answer()
-    if not await is_admin(call.from_user.id):
+    if not await is_owner(call.from_user.id):
         return
-        
     await state.set_state(AdminStates.waiting_for_channel_id)
     cancel_kb = get_cancel_keyboard()
     await call.message.answer(
-        "Kanal ID sini kiriting (masalan, `-100123456789`):\n\n"
-        "💡 *Eslatma:* Bot ushbu kanalda administrator bo'lishi shart!",
+        "Majburiy kanal ID sini kiriting (masalan, `-100123456789`):\n\n"
+        "💡 <b>Eslatma:</b> Bot ushbu kanalda administrator bo'lishi shart!",
         reply_markup=cancel_kb,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @router.message(AdminStates.waiting_for_channel_id)
-async def process_channel_id(message: Message, state: FSMContext):
+async def process_mchannel_id(message: Message, state: FSMContext):
     try:
         channel_id = int(message.text.strip())
         if not str(channel_id).startswith("-100"):
             raise ValueError
     except ValueError:
-        await message.answer("⚠️ Kanal ID noto'g'ri. U `-100` bilan boshlanishi kerak (masalan, `-100123456789`):")
+        await message.answer("⚠️ Kanal ID noto'g'ri. U `-100` bilan boshlanishi kerak:")
         return
-        
-    # Verify bot is administrator in this channel
     try:
         member = await message.bot.get_chat_member(chat_id=channel_id, user_id=message.bot.id)
         if member.status not in ["administrator", "creator"]:
-            await message.answer("⚠️ Bot ushbu kanalda administrator emas! Botni administrator qilib qaytadan urinib ko'ring:")
+            await message.answer("⚠️ Bot ushbu kanalda administrator emas!")
             return
     except Exception as e:
         await message.answer(f"⚠️ Kanal topilmadi yoki bot u erda yo'q. Xatolik: {e}\nQaytadan kiriting:")
         return
-        
     await state.update_data(channel_id=channel_id)
     await state.set_state(AdminStates.waiting_for_channel_link)
-    await message.answer("Kanalga taklif havolasini (invite link) kiriting:")
+    await message.answer("Kanal taklif havolasini (invite link) kiriting:")
 
 @router.message(AdminStates.waiting_for_channel_link)
-async def process_channel_link(message: Message, state: FSMContext):
+async def process_mchannel_link(message: Message, state: FSMContext):
     link = message.text.strip()
     if not link.startswith("https://t.me/"):
         await message.answer("⚠️ Havola noto'g'ri formatda. `https://t.me/...` kabi havola yuboring:")
         return
-        
     await state.update_data(invite_link=link)
     await state.set_state(AdminStates.waiting_for_channel_title)
     await message.answer("Kanal nomini kiriting:")
 
 @router.message(AdminStates.waiting_for_channel_title)
-async def process_channel_title(message: Message, state: FSMContext):
+async def process_mchannel_title(message: Message, state: FSMContext):
     title = message.text.strip()
     if not title:
         await message.answer("Kanal nomini kiriting:")
         return
-        
     data = await state.get_data()
     channel_id = data['channel_id']
     invite_link = data['invite_link']
     admin_id = message.from_user.id
-    
-    success = await add_channel(
-        channel_id=channel_id,
-        invite_link=invite_link,
-        title=title,
-        added_by=admin_id
-    )
-    
+    success = await add_mandatory_channel(channel_id, invite_link, title, admin_id)
     await state.clear()
     kb = await get_admin_keyboard(admin_id)
     if success:
-        await message.answer(f"🎉 Kanal muvaffaqiyatli qo'shildi: **{title}**", reply_markup=kb, parse_mode="Markdown")
+        await message.answer(f"🎉 Majburiy kanal muvaffaqiyatli qo'shildi: <b>{html.escape(title)}</b>", reply_markup=kb, parse_mode="HTML")
     else:
         await message.answer("⚠️ Kanal qo'shishda xatolik yuz berdi.", reply_markup=kb)
 
-@router.callback_query(F.data == "admin_remove_channel")
-async def start_remove_channel(call: CallbackQuery):
+@router.callback_query(F.data.startswith("toggle_mchan:"))
+async def process_toggle_mchan(call: CallbackQuery):
     await call.answer()
-    user_id = call.from_user.id
-    if not await is_admin(user_id):
+    if not await is_owner(call.from_user.id):
         return
-        
-    channels = await get_channels_by_admin(user_id)
-    if not channels:
-        await call.message.answer("O'chirish uchun ulangan kanallar topilmadi.")
-        return
-        
-    buttons = []
-    for ch in channels:
-        buttons.append([InlineKeyboardButton(text=f"🗑 {ch['title']}", callback_data=f"del_chan:{ch['channel_id']}")])
-        
-    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
-    await call.message.answer("O'chirmoqchi bo'lgan kanalni tanlang:", reply_markup=kb)
-
-@router.callback_query(F.data.startswith("del_chan:"))
-async def process_delete_channel(call: CallbackQuery):
-    await call.answer()
-    user_id = call.from_user.id
-    if not await is_admin(user_id):
-        return
-        
     channel_id = int(call.data.split(":")[1])
-    
-    # Secure: non-owners can only delete their own channels
-    channel = await channels_col.find_one({"channel_id": channel_id})
+    from database.db import toggle_mandatory_channel_status, get_all_mandatory_channels
+    await toggle_mandatory_channel_status(channel_id)
+    channels = await get_all_mandatory_channels()
+    kb = get_mandatory_channels_manage_keyboard(channels)
+    await call.message.edit_reply_markup(reply_markup=kb)
+
+@router.callback_query(F.data.startswith("del_mchan:"))
+async def process_delete_mchan(call: CallbackQuery):
+    await call.answer()
+    if not await is_owner(call.from_user.id):
+        return
+    channel_id = int(call.data.split(":")[1])
+    await remove_mandatory_channel(channel_id)
+    await call.message.delete()
+    await call.message.answer("✅ Majburiy kanal o'chirildi.")
+
+
+# --- Mening kanallarim Panel (Test channels managed per admin) ---
+
+@router.message(F.text == "🔗 Mening kanallarim")
+async def manage_my_test_channels(message: Message):
+    if not await check_admin_auth(message):
+        return
+    user_id = message.from_user.id
+    channels = await get_test_channels_by_admin(user_id)
+    text = "🔗 <b>Test o'tkaziladigan kanallaringiz:</b>\n\n"
+    if not channels:
+        text += "Hozirda hech qanday test kanali ulamagansiz."
+    else:
+        for idx, ch in enumerate(channels, 1):
+            text += f"{idx}. <b>{html.escape(ch['title'])}</b> (ID: <code>{ch['channel_id']}</code>)\n"
+            
+    kb = get_test_channels_manage_keyboard(channels)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "add_tchan")
+async def start_add_tchan(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if not await is_admin(call.from_user.id):
+        return
+    await state.set_state(AdminStates.waiting_for_test_channel_id)
+    cancel_kb = get_cancel_keyboard()
+    await call.message.answer(
+        "Test o'tkaziladigan kanal ID sini kiriting (masalan, `-100123456789`):\n\n"
+        "💡 <b>Eslatma:</b> Bot ushbu kanalda administrator bo'lishi shart!",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+
+@router.message(AdminStates.waiting_for_test_channel_id)
+async def process_tchannel_id(message: Message, state: FSMContext):
+    try:
+        channel_id = int(message.text.strip())
+        if not str(channel_id).startswith("-100"):
+            raise ValueError
+    except ValueError:
+        await message.answer("⚠️ Kanal ID noto'g'ri. U `-100` bilan boshlanishi kerak:")
+        return
+    try:
+        member = await message.bot.get_chat_member(chat_id=channel_id, user_id=message.bot.id)
+        if member.status not in ["administrator", "creator"]:
+            await message.answer("⚠️ Bot ushbu kanalda administrator emas!")
+            return
+    except Exception as e:
+        await message.answer(f"⚠️ Kanal topilmadi yoki bot u erda yo'q. Xatolik: {e}\nQaytadan kiriting:")
+        return
+    await state.update_data(channel_id=channel_id)
+    await state.set_state(AdminStates.waiting_for_test_channel_link)
+    await message.answer("Kanal taklif havolasini (invite link) kiriting:")
+
+@router.message(AdminStates.waiting_for_test_channel_link)
+async def process_tchannel_link(message: Message, state: FSMContext):
+    link = message.text.strip()
+    if not link.startswith("https://t.me/"):
+        await message.answer("⚠️ Havola noto'g'ri formatda. `https://t.me/...` kabi havola yuboring:")
+        return
+    await state.update_data(invite_link=link)
+    await state.set_state(AdminStates.waiting_for_test_channel_title)
+    await message.answer("Kanal nomini kiriting:")
+
+@router.message(AdminStates.waiting_for_test_channel_title)
+async def process_tchannel_title(message: Message, state: FSMContext):
+    title = message.text.strip()
+    if not title:
+        await message.answer("Kanal nomini kiriting:")
+        return
+    data = await state.get_data()
+    channel_id = data['channel_id']
+    invite_link = data['invite_link']
+    admin_id = message.from_user.id
+    success = await add_test_channel(channel_id, invite_link, title, admin_id)
+    await state.clear()
+    kb = await get_admin_keyboard(admin_id)
+    if success:
+        await message.answer(f"🎉 Test o'tkaziladigan kanal muvaffaqiyatli qo'shildi: <b>{html.escape(title)}</b>", reply_markup=kb, parse_mode="HTML")
+    else:
+        await message.answer("⚠️ Kanal qo'shishda xatolik yuz berdi.", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("del_tchan:"))
+async def process_delete_tchan(call: CallbackQuery):
+    await call.answer()
+    user_id = call.from_user.id
+    if not await is_admin(user_id):
+        return
+    channel_id = int(call.data.split(":")[1])
+    channel = await get_test_channel(channel_id)
     if not channel:
         await call.message.answer("Kanal topilmadi.")
         return
-        
     if channel.get("added_by") != user_id and not await is_owner(user_id):
         await call.message.answer("⚠️ Siz ushbu kanalni o'chira olmaysiz.")
         return
-        
-    success = await remove_channel(channel_id)
+    success = await remove_test_channel(channel_id)
     if success:
         await call.message.delete()
-        await call.message.answer("✅ Kanal muvaffaqiyatli o'chirildi.")
+        await call.message.answer("✅ Test kanali o'chirildi.")
     else:
         await call.message.answer("⚠️ Kanalni o'chirishda xatolik yuz berdi.")
+
+
+# --- Genre Management Panel ---
+
+@router.message(F.text == "📚 Janrlarni boshqarish")
+async def manage_genres(message: Message):
+    if not await check_admin_auth(message):
+        return
+    genres = await get_all_genres()
+    text = "📚 <b>Janrlar ro'yxati:</b>\n\n"
+    if not genres:
+        text += "Hozircha hech qanday janr qo'shilmagan."
+    else:
+        for idx, g in enumerate(genres, 1):
+            text += f"{idx}. <b>{html.escape(g['name'])}</b>\n"
+            
+    kb = get_genres_manage_keyboard(genres)
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data == "add_genre")
+async def start_add_genre(call: CallbackQuery, state: FSMContext):
+    await call.answer()
+    if not await is_admin(call.from_user.id):
+        return
+    await state.set_state(AdminStates.waiting_for_genre_name)
+    cancel_kb = get_cancel_keyboard()
+    await call.message.answer("Yangi janr nomini kiriting:", reply_markup=cancel_kb)
+
+@router.message(AdminStates.waiting_for_genre_name)
+async def process_add_genre(message: Message, state: FSMContext):
+    if not await is_admin(message.from_user.id):
+        await state.clear()
+        return
+    name = message.text.strip()
+    if not name:
+        await message.answer("Iltimos, janr nomini kiriting:")
+        return
+    success = await add_genre(name, message.from_user.id)
+    await state.clear()
+    kb = await get_admin_keyboard(message.from_user.id)
+    if success:
+        await message.answer(f"🎉 Yangi janr muvaffaqiyatli qo'shildi: <b>{html.escape(name)}</b>", reply_markup=kb, parse_mode="HTML")
+    else:
+        await message.answer("⚠️ Janr qo'shishda xatolik yuz berdi.", reply_markup=kb)
+
+@router.callback_query(F.data.startswith("del_genre:"))
+async def process_delete_genre(call: CallbackQuery):
+    await call.answer()
+    if not await is_admin(call.from_user.id):
+        return
+    genre_id = call.data.split(":")[1]
+    success = await delete_genre(genre_id)
+    if success:
+        await call.message.delete()
+        await call.message.answer("✅ Janr muvaffaqiyatli o'chirildi.")
+    else:
+        await call.message.answer("⚠️ Janrni o'chirishda xatolik yuz berdi.")
+
 
 # --- Broadcast Handler (Super Admin Only) ---
 
@@ -267,10 +390,10 @@ async def start_broadcast(message: Message, state: FSMContext):
     await state.set_state(AdminStates.waiting_for_broadcast_msg)
     cancel_kb = get_cancel_keyboard()
     await message.answer(
-        "📢 **Xabar yuborish bo'limi.**\n\n"
+        "📢 <b>Xabar yuborish bo'limi.</b>\n\n"
         "Barcha foydalanuvchilarga yubormoqchi bo'lgan xabaringizni yuboring (Matn, Rasm, Video yoki boshqa formatda):",
         reply_markup=cancel_kb,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @router.message(AdminStates.waiting_for_broadcast_msg)
@@ -287,7 +410,6 @@ async def process_broadcast_message(message: Message, state: FSMContext, bot: Bo
     success = 0
     fail = 0
     
-    # Cursor to loop through all users
     cursor = users_col.find({})
     async for user in cursor:
         tg_id = user["tg_id"]
@@ -303,11 +425,12 @@ async def process_broadcast_message(message: Message, state: FSMContext, bot: Bo
             
     await status_msg.delete()
     await message.answer(
-        f"📢 **Xabar yuborish yakunlandi:**\n\n"
-        f"✅ Muvaffaqiyatli: **{success}**\n"
-        f"❌ Muvaffaqiyatsiz (bloklaganlar): **{fail}**",
-        parse_mode="Markdown"
+        f"📢 <b>Xabar yuborish yakunlandi:</b>\n\n"
+        f"✅ Muvaffaqiyatli: <b>{success}</b>\n"
+        f"❌ Muvaffaqiyatsiz (bloklaganlar): <b>{fail}</b>",
+        parse_mode="HTML"
     )
+
 
 # --- Global Footer Settings (Super Admin Only) ---
 
@@ -318,13 +441,13 @@ async def view_footer_settings(message: Message, state: FSMContext):
         
     footer = await get_global_footer()
     text = (
-        f"🏷 **Universal Footer Sozlamalari**\n\n"
-        f"Hozirgi footer matni:\n`{footer or 'O‘rnatilmagan'}`\n\n"
-        f"Yangi footer matnini yuboring. O'chirish uchun `none` so'zini yuboring:"
+        f"🏷 <b>Universal Footer Sozlamalari</b>\n\n"
+        f"Hozirgi footer matni:\n<code>{html.escape(footer or 'O‘rnatilmagan')}</code>\n\n"
+        f"Yangi footer matnini yuboring. O'chirish uchun <code>none</code> so'zini yuboring:"
     )
     await state.set_state(AdminStates.waiting_for_footer_text)
     cancel_kb = get_cancel_keyboard()
-    await message.answer(text, reply_markup=cancel_kb, parse_mode="Markdown")
+    await message.answer(text, reply_markup=cancel_kb, parse_mode="HTML")
 
 @router.message(AdminStates.waiting_for_footer_text)
 async def process_footer_text(message: Message, state: FSMContext):
@@ -341,7 +464,8 @@ async def process_footer_text(message: Message, state: FSMContext):
         await message.answer("✅ Universal footer o'chirildi.", reply_markup=kb)
     else:
         await set_global_footer(text)
-        await message.answer(f"✅ Yangi universal footer saqlandi:\n\n{text}", reply_markup=kb)
+        await message.answer(f"✅ Yangi universal footer saqlandi:\n\n{html.escape(text)}", reply_markup=kb)
+
 
 # --- Add/Remove Admins (Super Admin Only) ---
 
@@ -351,12 +475,12 @@ async def view_admins(message: Message):
         return
         
     admins = await get_all_admins()
-    text = "👮 **Standard Adminlar ro'yxati:**\n\n"
+    text = "👮 <b>Standard Adminlar ro'yxati:</b>\n\n"
     if not admins:
         text += "Hozircha standard adminlar yo'q."
     else:
         for idx, adm in enumerate(admins, 1):
-            text += f"{idx}. ID: `{adm['tg_id']}` (Qo'shilgan vaqti: {adm['added_at'].strftime('%Y-%m-%d %H:%M')})\n"
+            text += f"{idx}. ID: <code>{adm['tg_id']}</code> (Qo'shilgan vaqti: {adm['added_at'].strftime('%Y-%m-%d %H:%M')})\n"
             
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -366,7 +490,7 @@ async def view_admins(message: Message):
             ]
         ]
     )
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+    await message.answer(text, reply_markup=kb, parse_mode="HTML")
 
 @router.callback_query(F.data == "admin_add_new")
 async def start_add_admin(call: CallbackQuery, state: FSMContext):
@@ -395,7 +519,7 @@ async def process_add_admin(message: Message, state: FSMContext):
     kb = await get_admin_keyboard(message.from_user.id)
     
     if success:
-        await message.answer(f"✅ Foydalanuvchi (ID: `{tg_id}`) standard admin qilib tayinlandi.", reply_markup=kb, parse_mode="Markdown")
+        await message.answer(f"✅ Foydalanuvchi (ID: <code>{tg_id}</code>) standard admin qilib tayinlandi.", reply_markup=kb, parse_mode="HTML")
     else:
         await message.answer("⚠️ Ushbu foydalanuvchi allaqachon admin yoki xatolik yuz berdi.", reply_markup=kb)
 

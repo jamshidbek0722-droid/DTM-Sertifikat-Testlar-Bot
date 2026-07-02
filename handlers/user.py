@@ -1,23 +1,23 @@
+import html
+import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery, User, ReplyKeyboardRemove
 from database.db import (
-    get_user, create_user, register_user, is_admin, get_active_tests, get_past_tests, get_all_channels
+    get_user, create_user, register_user, is_admin, get_active_tests, get_past_tests, get_all_channels,
+    get_all_genres, get_genre, tests_col
 )
 from states.states import ProfileStates
 from keyboards.reply import get_main_keyboard, get_cancel_keyboard
 from keyboards.inline import (
     get_complete_profile_keyboard, get_gender_keyboard, get_subscription_keyboard,
-    get_region_keyboard, get_subjects_keyboard
+    get_region_keyboard, get_subjects_keyboard, get_past_genres_keyboard, get_past_tests_keyboard
 )
 import logging
 
 logger = logging.getLogger(__name__)
 router = Router()
-
-# We will import start_test_taking dynamically inside handlers to avoid circular imports.
-# Alternatively, we can define a shared helper or import it directly.
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, bot: Bot):
@@ -67,14 +67,14 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot):
     if not user.get("registered", False):
         kb = get_complete_profile_keyboard()
         await message.answer(
-            f"Assalomu alaykum, {name}! DTM Testlar botiga xush kelibsiz.\n\n"
+            f"Assalomu alaykum, {html.escape(name)}! DTM Testlar botiga xush kelibsiz.\n\n"
             f"Bot imkoniyatlaridan to'liq foydalanish uchun profilingizni to'ldiring.",
             reply_markup=kb
         )
     else:
         kb = await get_main_keyboard(tg_id)
         await message.answer(
-            f"Xush kelibsiz, {name}!",
+            f"Xush kelibsiz, {html.escape(name)}!",
             reply_markup=kb
         )
 
@@ -94,7 +94,6 @@ async def start_profile_completion(call: CallbackQuery, state: FSMContext):
     await state.clear()
     
     await state.set_state(ProfileStates.waiting_for_region)
-    # Clear reply keyboard
     cancel_kb = get_cancel_keyboard()
     await call.message.answer(
         "Ro'yxatdan o'tish boshlandi. Hududni tanlang:",
@@ -117,9 +116,9 @@ async def process_region_callback(call: CallbackQuery, state: FSMContext):
     
     kb = get_gender_keyboard()
     await call.message.answer(
-        f"Tanlangan hudud: **{region}**\n\nJinsingizni tanlang:",
+        f"Tanlangan hudud: <b>{html.escape(region)}</b>\n\nJinsingizni tanlang:",
         reply_markup=kb,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     await call.message.delete()
 
@@ -143,8 +142,9 @@ async def process_region(message: Message, state: FSMContext):
 async def process_gender(call: CallbackQuery, state: FSMContext):
     await call.answer()
     gender = call.data.split("_")[1]
+    gender_uz = "Erkak" if gender == "Male" else "Ayol"
     
-    await state.update_data(gender=gender)
+    await state.update_data(gender=gender_uz)
     await state.set_state(ProfileStates.waiting_for_age)
     
     await call.message.answer(
@@ -164,12 +164,11 @@ async def process_age(message: Message, state: FSMContext):
     await state.update_data(age=age)
     await state.set_state(ProfileStates.waiting_for_subject)
     
-    # Initialize empty selected subjects
     await state.update_data(selected_subjects=[])
     kb = get_subjects_keyboard([])
     await message.answer(
         "Quyidagi ro'yxatdan qiziqadigan fanlaringizni tanlang (bir nechtasini tanlashingiz mumkin) "
-        "va '💾 Saqlash' tugmasini bosing:",
+        "va '📥 Saqlash' tugmasini bosing:",
         reply_markup=kb
     )
 
@@ -219,9 +218,9 @@ async def save_subjects_callback(call: CallbackQuery, state: FSMContext):
     await call.message.delete()
     await call.message.answer(
         f"🎉 Profilingiz muvaffaqiyatli yakunlandi! Rahmat.\n\n"
-        f"📚 Tanlangan fanlar: **{subject_str}**",
+        f"📚 Tanlangan fanlar: <b>{html.escape(subject_str)}</b>",
         reply_markup=kb,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 # --- Main Menu Button Handlers ---
@@ -239,28 +238,28 @@ async def show_profile(message: Message):
         
     if not user.get("registered", False):
         text = (
-            f"👤 **Profilingiz**\n\n"
-            f"🆔 ID: `{tg_id}`\n"
-            f"📛 Ism: {user.get('name')}\n"
-            f"🔗 Username: @{user.get('username') or 'yoq'}\n\n"
-            f"⚠️ *Profil to'ldirilmagan!*"
+            f"👤 <b>Profilingiz</b>\n\n"
+            f"🆔 ID: <code>{tg_id}</code>\n"
+            f"📛 Ism: {html.escape(user.get('name', 'Yoq'))}\n"
+            f"🔗 Username: @{html.escape(user.get('username') or 'yoq')}\n\n"
+            f"⚠️ <i>Profil to'ldirilmagan!</i>"
         )
         kb = get_complete_profile_keyboard()
-        await message.answer(text, reply_markup=kb, parse_mode="Markdown")
+        await message.answer(text, reply_markup=kb, parse_mode="HTML")
     else:
         text = (
-            f"👤 **Profilingiz**\n\n"
-            f"🆔 ID: `{tg_id}`\n"
-            f"📛 Ism: {user.get('name')}\n"
-            f"🔗 Username: @{user.get('username') or 'yoq'}\n"
-            f"📍 Hudud: {user.get('region')}\n"
-            f"🙋‍♂️ Jins: {user.get('gender')}\n"
-            f"🔢 Yosh: {user.get('age')}\n"
-            f"📚 Qiziqish: {user.get('subject')}\n\n"
-            f"👥 Taklif qilgan do'stlaringiz soni: **{user.get('referrals_count', 0)}**\n"
+            f"👤 <b>Profilingiz</b>\n\n"
+            f"🆔 ID: <code>{tg_id}</code>\n"
+            f"📛 Ism: {html.escape(user.get('name', 'Yoq'))}\n"
+            f"🔗 Username: @{html.escape(user.get('username') or 'yoq')}\n"
+            f"📍 Hudud: {html.escape(user.get('region', 'Nomalum'))}\n"
+            f"🙋‍♂️ Jins: {html.escape(user.get('gender', 'Nomalum'))}\n"
+            f"🔢 Yosh: {user.get('age', 'Nomalum')}\n"
+            f"📚 Qiziqish: {html.escape(user.get('subject', 'Nomalum'))}\n\n"
+            f"👥 Taklif qilgan do'stlaringiz soni: <b>{user.get('referrals_count', 0)}</b>\n"
             f"🔗 Referral havolangiz:\n{ref_link}"
         )
-        await message.answer(text, parse_mode="Markdown")
+        await message.answer(text, parse_mode="HTML")
 
 @router.message(F.text == "📝 Faol testlar")
 async def show_active_tests(message: Message):
@@ -270,30 +269,87 @@ async def show_active_tests(message: Message):
         return
         
     bot_info = await message.bot.get_me()
-    text = "📝 **Faol testlar ro'yxati:**\n\n"
+    text = "📝 <b>Faol testlar ro'yxati:</b>\n\n"
     for idx, t in enumerate(tests, 1):
-        text += f"{idx}. Test ID: `{t['test_id']}`\n"
-        text += f"⏱ Davomiyligi: {t['duration_minutes']} daqiqa\n"
-        text += f"👉 [Testni boshlash (Deep-link)](https://t.me/{bot_info.username}?start=test_{t['test_id']})\n\n"
+        text += f"{idx}. Test nomi: <b>{html.escape(t.get('test_name', 'Nomsiz test'))}</b>\n"
+        text += f"   📋 Test ID: <code>{t['test_id']}</code>\n"
+        text += f"   ⏱ Davomiyligi: {t['duration_minutes']} daqiqa\n"
+        text += f"   👉 <a href='https://t.me/{bot_info.username}?start=test_{t['test_id']}'>Testni boshlash (Deep-link)</a>\n\n"
         
-    await message.answer(text, parse_mode="Markdown", disable_web_page_preview=True)
+    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+
+# --- Completed Tests filtering by Genre & Deep Link (Item 8) ---
 
 @router.message(F.text == "🗂 Yakunlangan testlar")
 async def show_past_tests(message: Message):
-    tests = await get_past_tests()
-    if not tests:
-        await message.answer("Tugallangan testlar mavjud emas.")
+    genres = await get_all_genres()
+    if not genres:
+        await message.answer("Tugallangan testlar mavjud emas (Hech qanday janr topilmadi).")
         return
         
-    text = "🗂 **Tugallangan testlar ro'yxati:**\n\n"
-    for idx, t in enumerate(tests, 1):
-        text += f"{idx}. Test ID: `{t['test_id']}`\n"
-        text += f"🔑 Javoblar kaliti: `{t['answer_key'].upper()}`\n"
-        if t.get('solutions_text'):
-            text += f"💡 Yechim: {t['solutions_text']}\n"
-        text += "\n"
+    kb = get_past_genres_keyboard(genres)
+    await message.answer("🗂 <b>Yakunlangan testlar bo'limi.</b>\nIltimos, test janrini tanlang:", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("past_genre:"))
+async def process_past_genre_select(call: CallbackQuery):
+    await call.answer()
+    genre_id = call.data.split(":")[1]
+    
+    # Query finished tests belonging to this genre
+    cursor = tests_col.find({"status": "finished", "genre_id": genre_id})
+    tests = await cursor.to_list(length=None)
+    
+    genre = await get_genre(genre_id)
+    genre_name = genre["name"] if genre else "Nomalum"
+    
+    if not tests:
+        await call.message.answer(f"⚠️ <b>{html.escape(genre_name)}</b> janrida yakunlangan testlar topilmadi.")
+        return
         
-    await message.answer(text, parse_mode="Markdown")
+    kb = get_past_tests_keyboard(tests)
+    await call.message.answer(f"🗂 <b>{html.escape(genre_name)}</b> janridagi yakunlangan testlar:", reply_markup=kb, parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("view_past_test:"))
+async def process_view_past_test(call: CallbackQuery, bot: Bot):
+    await call.answer()
+    test_id = call.data.split(":")[1]
+    
+    from database.db import get_test
+    test = await get_test(test_id)
+    if not test:
+        await call.message.answer("Test topilmadi.")
+        return
+        
+    post_link = ""
+    if test.get("test_post_msg_id") and test.get("channel_id"):
+        ch_id = test["channel_id"]
+        msg_id = test["test_post_msg_id"]
+        try:
+            chat = await bot.get_chat(ch_id)
+            if chat.username:
+                post_link = f"https://t.me/{chat.username}/{msg_id}"
+            else:
+                clean_id = str(ch_id).replace("-100", "")
+                post_link = f"https://t.me/c/{clean_id}/{msg_id}"
+        except Exception:
+            clean_id = str(ch_id).replace("-100", "")
+            post_link = f"https://t.me/c/{clean_id}/{msg_id}"
+            
+    local_start = test['start_time'] + datetime.timedelta(hours=5) if test.get("start_time") else datetime.datetime.now()
+    
+    text = (
+        f"🗂 <b>YAKUNLANGAN TEST MA'LUMOTLARI</b>\n\n"
+        f"📋 Test nomi: <b>{html.escape(test.get('test_name', 'Nomsiz'))}</b>\n"
+        f"📋 Test ID: <code>{test_id}</code>\n"
+        f"📅 Boshlangan vaqti: {local_start.strftime('%Y-%m-%d %H:%M')} (UZB)\n"
+        f"🔑 Javoblar kaliti: <code>{test['answer_key'].upper()}</code>\n"
+    )
+    if test.get("solutions_text"):
+        text += f"💡 Yechim: <i>{html.escape(test['solutions_text'])}</i>\n"
+    if post_link:
+        text += f"\n👉 <a href='{post_link}'>Original test postiga o'tish</a>"
+        
+    await call.message.answer(text, parse_mode="HTML")
 
 # --- Forced Subscription Callback Checker ---
 
@@ -302,7 +358,6 @@ async def check_sub_callback(call: CallbackQuery, state: FSMContext, bot: Bot):
     await call.answer()
     payload = call.data.split(":", 1)[1]
     
-    # Run full subscription check
     channels = await get_all_channels()
     unsubscribed = []
     for ch in channels:
@@ -314,21 +369,18 @@ async def check_sub_callback(call: CallbackQuery, state: FSMContext, bot: Bot):
             unsubscribed.append(ch)
             
     if unsubscribed:
-        # Prompt user again with the remaining channels and same payload
         await call.message.answer(
             "⚠️ Siz hali ham barcha kanallarga a'zo bo'lmadingiz. Iltimos, a'zo bo'lib qaytadan urinib ko'ring.",
             reply_markup=get_subscription_keyboard(unsubscribed, payload)
         )
         return
         
-    # User is fully subscribed
     await call.message.delete()
     await call.message.answer("🎉 Tabriklaymiz! Kanallarga a'zo bo'lish muvaffaqiyatli tekshirildi.")
     
     if payload.startswith("test_"):
         test_id = payload.replace("test_", "")
         from handlers.test_taking import start_test_taking
-        # Call start_test_taking directly
         await start_test_taking(call.message, call.from_user, test_id, state)
     else:
         kb = await get_main_keyboard(call.from_user.id)
